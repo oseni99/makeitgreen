@@ -26,6 +26,27 @@ _SCHEMA_LOCK = threading.Lock()
 _INITIALIZED_DATABASES: set[Path] = set()
 
 
+def _has_expected_schema(path: Path) -> bool:
+    """Return whether a cached database still contains our tables.
+
+    The database can be replaced externally (for example during a restore)
+    without changing its path.  A path-only initialization cache must not
+    let such a file skip schema setup.
+    """
+    try:
+        conn = sqlite3.connect(path, timeout=30.0, check_same_thread=False)
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('progress', 'runs')"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return False
+    return {row[0] for row in rows} == {"progress", "runs"}
+
+
 def _initialize_schema(path: Path) -> None:
     """Run connection-global setup and migrations once for a database file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,10 +106,14 @@ def _initialize_schema(path: Path) -> None:
 
 def _ensure_schema() -> Path:
     path = DB_PATH.resolve()
-    if path in _INITIALIZED_DATABASES and path.exists():
+    if path in _INITIALIZED_DATABASES and path.exists() and _has_expected_schema(path):
         return path
     with _SCHEMA_LOCK:
-        if path not in _INITIALIZED_DATABASES or not path.exists():
+        if (
+            path not in _INITIALIZED_DATABASES
+            or not path.exists()
+            or not _has_expected_schema(path)
+        ):
             _initialize_schema(path)
             _INITIALIZED_DATABASES.add(path)
     return path

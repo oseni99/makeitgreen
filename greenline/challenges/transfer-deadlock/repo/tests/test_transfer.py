@@ -59,10 +59,14 @@ def test_concurrent_opposite_transfers() -> None:
     """Opposite-direction transfers must not deadlock; net balances unchanged."""
     svc, store = make_service()
     barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
 
     def move(src: str, dst: str, amount: int) -> None:
-        barrier.wait(timeout=2)
-        svc.transfer(src, dst, amount)
+        try:
+            barrier.wait(timeout=2)
+            svc.transfer(src, dst, amount)
+        except BaseException as exc:
+            errors.append(exc)
 
     t1 = threading.Thread(target=move, args=("alice", "bob", 750), daemon=True)
     t2 = threading.Thread(target=move, args=("bob", "alice", 750), daemon=True)
@@ -73,5 +77,6 @@ def test_concurrent_opposite_transfers() -> None:
 
     assert not t1.is_alive(), "alice→bob transfer hung (deadlock?)"
     assert not t2.is_alive(), "bob→alice transfer hung (deadlock?)"
+    assert errors == []
     assert store.balance("alice") == 10_000
     assert store.balance("bob") == 10_000

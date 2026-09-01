@@ -8,6 +8,7 @@ A challenge lives in challenges/<slug>/ with this layout:
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,40 @@ class InvalidChallengeFileEncoding(Exception):
     """A repo or solution file cannot be represented by the text-file API."""
 
 
+STRING_METADATA_FIELDS = {
+    "title",
+    "type",
+    "difficulty",
+    "language",
+    "blurb",
+    "brief",
+}
+NUMBER_METADATA_FIELDS = {"minutes", "order"}
+PATH_LIST_METADATA_FIELDS = {"readonly", "creatable"}
+
+
+def _has_valid_documented_field_types(meta: dict[str, Any]) -> bool:
+    for field in STRING_METADATA_FIELDS:
+        if field in meta and not isinstance(meta[field], str):
+            return False
+    for field in NUMBER_METADATA_FIELDS:
+        value = meta.get(field)
+        if field in meta and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            return False
+    for field in PATH_LIST_METADATA_FIELDS:
+        value = meta.get(field)
+        if field in meta and (
+            not isinstance(value, list)
+            or not all(isinstance(prefix, str) and prefix for prefix in value)
+        ):
+            return False
+    return True
+
+
 def _load_metadata(meta_path: Path) -> dict[str, Any]:
     try:
         raw = meta_path.read_text(encoding="utf-8")
@@ -53,6 +88,8 @@ def _load_metadata(meta_path: Path) -> dict[str, Any]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise InvalidChallengeMetadata(meta_path.parent.name) from exc
     if not isinstance(meta, dict):
+        raise InvalidChallengeMetadata(meta_path.parent.name)
+    if not _has_valid_documented_field_types(meta):
         raise InvalidChallengeMetadata(meta_path.parent.name)
     runtime = meta.get("runtime")
     if runtime is not None:
@@ -75,6 +112,7 @@ def _load_metadata(meta_path: Path) -> dict[str, Any]:
         requirements = runtime.get("requirements")
         if requirements is not None and (
             not isinstance(requirements, str)
+            or not requirements
             or Path(requirements).is_absolute()
             or ".." in Path(requirements).parts
         ):
@@ -120,7 +158,9 @@ def solution_dir(slug: str) -> Path:
 
 
 def workspace_dir(slug: str) -> Path:
-    d = WORKSPACES_DIR / slug
+    d, _ = _safe_relpath(WORKSPACES_DIR, slug)
+    if d == WORKSPACES_DIR.resolve():
+        raise InvalidPath(slug)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -139,10 +179,10 @@ def workspace_overlays(slug: str) -> list[tuple[Path, str]]:
     runtime = meta.get("runtime") or {}
     requirements_path = runtime.get("requirements")
     for edited in ws.rglob("*"):
-        if not edited.is_file():
-            continue
         if edited.is_symlink():
             raise InvalidPath("workspace symlinks are not allowed")
+        if not edited.is_file():
+            continue
         rel = edited.relative_to(ws).as_posix()
         if any(part in IGNORED for part in Path(rel).parts):
             raise InvalidPath(rel)
@@ -242,7 +282,7 @@ def file_tree(slug: str) -> list[dict[str, Any]]:
 def read_file(slug: str, rel: str) -> str:
     """Return workspace copy if user has edited the file, else the original."""
     repo_file, canonical_rel = _safe_relpath(repo_dir(slug), rel)
-    ws_file = workspace_dir(slug).resolve() / canonical_rel
+    ws_file, _ = _safe_relpath(workspace_dir(slug), canonical_rel)
     if ws_file.is_file():
         return _read_text_file(ws_file)
     if not repo_file.is_file():
@@ -257,7 +297,7 @@ def write_file(slug: str, rel: str, content: str) -> None:
     repo_file, canonical_rel = _safe_relpath(repo_dir(slug), rel)
     if is_readonly(meta, canonical_rel):
         raise PermissionError(rel)
-    ws_file = workspace_dir(slug).resolve() / canonical_rel
+    ws_file, _ = _safe_relpath(workspace_dir(slug), canonical_rel)
     # Existing repo files, or files the user created under a creatable prefix.
     if not repo_file.is_file() and not ws_file.is_file():
         raise ChallengeNotFound(rel)

@@ -14,6 +14,31 @@ validate_challenges = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validate_challenges)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("minutes", "30"),
+        ("readonly", "tests/"),
+        ("readonly", ["tests/", 1]),
+        ("creatable", {"src/": True}),
+    ],
+)
+def test_validator_rejects_malformed_documented_metadata_fields(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    challenge = tmp_path / "demo"
+    challenge.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps({"title": "Demo", field: value}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=field):
+        validate_challenges.load_metadata(challenge)
+
+
 @pytest.mark.parametrize("exit_code", [-1, 2, 3, 4, 5])
 def test_pristine_validator_rejects_non_test_failure_exit_codes(
     tmp_path: Path,
@@ -171,3 +196,14 @@ def test_validator_rejects_solution_that_replaces_runtime_requirements(
     monkeypatch.setattr(validate_challenges, "run_suite", lambda _challenge, _workdir: next(results))
 
     assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_validator_rejects_empty_runtime_requirements(tmp_path: Path) -> None:
+    challenge = tmp_path / "demo"
+    (challenge / "repo").mkdir(parents=True)
+    (challenge / "challenge.json").write_text(
+        json.dumps({"runtime": {"kind": "python", "requirements": ""}})
+    )
+
+    with pytest.raises(ValueError, match="requirements"):
+        validate_challenges.runtime_config(challenge)

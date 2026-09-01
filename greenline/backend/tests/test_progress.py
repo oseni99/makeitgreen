@@ -202,3 +202,16 @@ def test_concurrent_sqlite_calls_do_not_crash() -> None:
     for t in threads:
         t.join()
     assert errors == []
+
+
+def test_replaced_database_at_same_path_is_initialized_again() -> None:
+    progress.record_run("before-replacement", green=False)
+
+    # Simulate restoring/replacing the database file without changing its
+    # configured path. The initialization cache must not trust the old file.
+    progress.DB_PATH.unlink()
+    progress.DB_PATH.touch()
+
+    assert progress.get_all() == {}
+    progress.record_run("after-replacement", green=True)
+    assert progress.get_all()["after-replacement"]["status"] == "solved"

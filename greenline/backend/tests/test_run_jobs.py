@@ -54,3 +54,48 @@ def test_job_offsets_remain_absolute_when_output_is_truncated() -> None:
     assert snapshot["output_truncated"] is True
     assert len(snapshot["output"]) == OUTPUT_LIMIT
     assert snapshot["next_offset"] == OUTPUT_LIMIT + 50
+
+
+def test_store_retains_only_recent_terminal_jobs_without_evicting_active_jobs() -> None:
+    store = RunJobStore(workers=2, terminal_job_limit=2)
+    active_started = Event()
+    finish_active = Event()
+    active_released = Event()
+
+    def active_work(_emit):
+        active_started.set()
+        assert finish_active.wait(timeout=2)
+        return {"green": True, "output": "active done\n"}
+
+    active = store.start(
+        "active",
+        active_work,
+        release=active_released.set,
+    )
+    assert active_started.wait(timeout=1)
+
+    terminal_ids: list[str] = []
+    for index in range(3):
+        released = Event()
+        started = store.start(
+            f"terminal-{index}",
+            lambda _emit, index=index: {
+                "green": True,
+                "output": f"terminal {index}\n",
+            },
+            release=released.set,
+        )
+        terminal_ids.append(started["job_id"])
+        assert released.wait(timeout=1)
+
+    assert store.get(active["job_id"])["status"] == "running"
+    assert store.get(terminal_ids[0]) is None
+    assert store.get(terminal_ids[1])["status"] == "completed"
+    assert store.get(terminal_ids[2])["status"] == "completed"
+
+    finish_active.set()
+    assert active_released.wait(timeout=1)
+
+    assert store.get(active["job_id"])["status"] == "completed"
+    assert store.get(terminal_ids[1]) is None
+    assert store.get(terminal_ids[2]) is not None

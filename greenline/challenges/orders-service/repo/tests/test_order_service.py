@@ -38,11 +38,15 @@ def test_processes_concurrent_checkouts() -> None:
               for _ in range(50)]
 
     results = []
+    errors = []
     barrier = threading.Barrier(len(orders))
 
     def buy(order):
-        barrier.wait()
-        results.append(svc.checkout(order))
+        try:
+            barrier.wait()
+            results.append(svc.checkout(order))
+        except BaseException as exc:
+            errors.append(exc)
 
     threads = [threading.Thread(target=buy, args=(o,)) for o in orders]
     for t in threads:
@@ -50,6 +54,8 @@ def test_processes_concurrent_checkouts() -> None:
     for t in threads:
         t.join()
 
+    assert errors == []
+    assert len(results) == len(orders)
     remaining = svc.inventory.available("GPU-4090")
     assert remaining == 0, f"expected inventory: 0, actual inventory: {remaining}"
     assert sum(results) == 10, f"expected 10 successful checkouts, got {sum(results)}"

@@ -99,6 +99,63 @@ def test_traversal_outside_repo_is_rejected(isolated_backend):
     assert not (workspaces_dir / "outside.py").exists()
 
 
+def test_workspace_symlink_cannot_read_or_overwrite_file_outside_workspace(
+    isolated_backend, tmp_path
+):
+    _, workspaces_dir = isolated_backend
+    outside = tmp_path / "outside.py"
+    outside.write_text("outside secret\n")
+    workspace_file = workspaces_dir / "sample" / "src" / "nested" / "service.py"
+    workspace_file.parent.mkdir(parents=True)
+    workspace_file.symlink_to(outside)
+    client = TestClient(app)
+
+    read_response = client.get(
+        "/api/challenges/sample/files/src/nested/service.py"
+    )
+    write_response = client.put(
+        "/api/challenges/sample/files/src/nested/service.py",
+        json={"content": "escaped write\n"},
+    )
+
+    assert read_response.status_code == 400
+    assert write_response.status_code == 400
+    assert outside.read_text() == "outside secret\n"
+
+
+def test_symlinked_challenge_workspace_cannot_create_file_outside_workspace(
+    isolated_backend, tmp_path
+):
+    _, workspaces_dir = isolated_backend
+    outside = tmp_path / "outside-workspace"
+    outside.mkdir()
+    workspaces_dir.mkdir(parents=True)
+    (workspaces_dir / "sample").symlink_to(outside, target_is_directory=True)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/challenges/sample/files/orders/handler.py",
+        json={"content": "escaped create\n"},
+    )
+
+    assert response.status_code == 400
+    assert not (outside / "orders" / "handler.py").exists()
+
+
+def test_symlinked_challenge_workspace_is_rejected_as_runner_overlay(
+    isolated_backend, tmp_path
+):
+    _, workspaces_dir = isolated_backend
+    outside = tmp_path / "outside-overlay"
+    (outside / "src" / "nested").mkdir(parents=True)
+    (outside / "src" / "nested" / "service.py").write_text("outside code\n")
+    workspaces_dir.mkdir(parents=True)
+    (workspaces_dir / "sample").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(challenges.InvalidPath):
+        challenges.workspace_overlays("sample")
+
+
 def test_create_file_under_creatable_prefix(isolated_backend):
     _, workspaces_dir = isolated_backend
     client = TestClient(app)

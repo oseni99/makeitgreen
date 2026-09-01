@@ -147,12 +147,47 @@ def test_metadata_extra_fields_and_missing_optional_are_ok(
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("title", 42),
+        ("type", ["Concurrency"]),
+        ("difficulty", None),
+        ("language", {"name": "Python"}),
+        ("blurb", False),
+        ("brief", ["Fix it"]),
+        ("minutes", "30"),
+        ("minutes", True),
+        ("minutes", float("nan")),
+        ("order", "1"),
+        ("readonly", "tests/"),
+        ("readonly", ["tests/", 1]),
+        ("creatable", {"src/": True}),
+        ("creatable", [""]),
+    ],
+)
+def test_malformed_documented_metadata_fields_are_rejected(
+    isolated_challenges: Path,
+    field: str,
+    value: object,
+) -> None:
+    _write_challenge(
+        isolated_challenges,
+        "bad-field",
+        meta={"title": "Bad field", field: value},
+    )
+
+    with pytest.raises(ch.InvalidChallengeMetadata):
+        ch.load("bad-field")
+
+
+@pytest.mark.parametrize(
     "runtime",
     [
         "node",
         {"kind": "shell", "command": ["echo"]},
         {"kind": "node"},
         {"kind": "node", "command": "node --test"},
+        {"kind": "python", "requirements": ""},
         {"kind": "python", "requirements": "../requirements.txt"},
     ],
 )

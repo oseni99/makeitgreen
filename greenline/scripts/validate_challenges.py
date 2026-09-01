@@ -7,6 +7,7 @@ absolute path. Discovers challenges next to this script's parent directory.
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,39 @@ class ProtectedSolutionPath(ValueError):
     """A reference solution attempts to replace protected challenge content."""
 
 
+STRING_METADATA_FIELDS = {
+    "title",
+    "type",
+    "difficulty",
+    "language",
+    "blurb",
+    "brief",
+}
+NUMBER_METADATA_FIELDS = {"minutes", "order"}
+PATH_LIST_METADATA_FIELDS = {"readonly", "creatable"}
+
+
+def validate_documented_field_types(meta: dict[str, object]) -> None:
+    for field in STRING_METADATA_FIELDS:
+        if field in meta and not isinstance(meta[field], str):
+            raise ValueError(f"{field} must be a string")
+    for field in NUMBER_METADATA_FIELDS:
+        value = meta.get(field)
+        if field in meta and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError(f"{field} must be a number")
+    for field in PATH_LIST_METADATA_FIELDS:
+        value = meta.get(field)
+        if field in meta and (
+            not isinstance(value, list)
+            or not all(isinstance(prefix, str) and prefix for prefix in value)
+        ):
+            raise ValueError(f"{field} must be an array of non-empty strings")
+
+
 def discover_slugs() -> list[str]:
     if not CHALLENGES_DIR.is_dir():
         return []
@@ -51,6 +85,7 @@ def load_metadata(challenge: Path) -> dict[str, object]:
         raise ValueError("invalid challenge metadata") from exc
     if not isinstance(meta, dict):
         raise ValueError("challenge metadata must be an object")
+    validate_documented_field_types(meta)
     return meta
 
 
@@ -74,7 +109,12 @@ def runtime_config(challenge: Path) -> tuple[list[str], str]:
         raise ValueError("runtime.command must be a non-empty string array")
     requirements = runtime.get("requirements")
     if requirements is not None:
-        if not isinstance(requirements, str) or Path(requirements).is_absolute() or ".." in Path(requirements).parts:
+        if (
+            not isinstance(requirements, str)
+            or not requirements
+            or Path(requirements).is_absolute()
+            or ".." in Path(requirements).parts
+        ):
             raise ValueError("runtime.requirements must be a safe relative path")
         if not (challenge / "repo" / requirements).is_file():
             raise ValueError("runtime.requirements does not exist")

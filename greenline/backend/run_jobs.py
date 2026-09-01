@@ -1,6 +1,7 @@
 """In-memory background run jobs with pollable incremental output."""
 from __future__ import annotations
 
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Lock
@@ -8,13 +9,33 @@ from typing import Any, Callable
 from uuid import uuid4
 
 OUTPUT_LIMIT = 20_000
+TERMINAL_JOB_LIMIT = 100
 
 
 class RunJobStore:
-    def __init__(self, *, workers: int = 4) -> None:
+    def __init__(
+        self,
+        *,
+        workers: int = 4,
+        terminal_job_limit: int = TERMINAL_JOB_LIMIT,
+    ) -> None:
+        if terminal_job_limit < 1:
+            raise ValueError("terminal_job_limit must be positive")
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="run-job")
         self._lock = Lock()
         self._jobs: dict[str, dict[str, Any]] = {}
+        self._terminal_job_limit = terminal_job_limit
+        self._terminal_jobs: deque[str] = deque()
+
+    def _record_terminal(self, job_id: str) -> None:
+        """Keep active jobs plus a bounded history ordered by completion time.
+
+        The caller must hold ``self._lock``.
+        """
+        self._terminal_jobs.append(job_id)
+        while len(self._terminal_jobs) > self._terminal_job_limit:
+            expired_id = self._terminal_jobs.popleft()
+            self._jobs.pop(expired_id, None)
 
     def start(
         self,
@@ -57,10 +78,12 @@ class RunJobStore:
                         max(0, len(result.get("output", "")) - len(job["output"])),
                     )
                     job["status"] = "completed"
+                    self._record_terminal(job_id)
             except Exception as exc:  # surfaced through the polling contract
                 with self._lock:
                     job["status"] = "failed"
                     job["error"] = str(exc)
+                    self._record_terminal(job_id)
             finally:
                 release()
 
