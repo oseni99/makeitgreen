@@ -224,6 +224,7 @@ export default function Workspace() {
   const monacoRef = useRef<Monaco | null>(null)
   const modelListenerRef = useRef<{ dispose: () => void } | null>(null)
   const pendingRevealRef = useRef<{ path: string; line: number } | null>(null)
+  const searchRequestRef = useRef(0)
   const saveCurrentRef = useRef<() => Promise<void>>(async () => {})
   const skipUnsavedRef = useRef(false)
 
@@ -489,18 +490,21 @@ export default function Workspace() {
   async function runSearch(e?: React.FormEvent) {
     e?.preventDefault()
     const q = searchQuery.trim()
+    const requestId = ++searchRequestRef.current
     if (!q) {
       setSearchHits([])
+      setSearching(false)
       return
     }
     setSearching(true)
     try {
-      setSearchHits(await api.search(slug, q))
+      const hits = await api.search(slug, q)
+      if (requestId === searchRequestRef.current) setSearchHits(hits)
     } catch (err) {
       console.error(err)
-      setSearchHits([])
+      if (requestId === searchRequestRef.current) setSearchHits([])
     } finally {
-      setSearching(false)
+      if (requestId === searchRequestRef.current) setSearching(false)
     }
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -68,10 +68,14 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function installServer({ failSecondFile = false } = {}) {
+function installServer({ failSecondFile = false, includeNewFile = false } = {}) {
   const saves: Array<{
     url: string
     content: string
+    response: ReturnType<typeof deferred<Response>>
+  }> = []
+  const searches: Array<{
+    query: string
     response: ReturnType<typeof deferred<Response>>
   }> = []
   let runNumber = 0
@@ -103,6 +107,14 @@ function installServer({ failSecondFile = false } = {}) {
         },
       })
     }
+    if (url.startsWith('/api/challenges/orders-service/search?') && method === 'GET') {
+      const response = deferred<Response>()
+      searches.push({
+        query: new URL(url, 'http://localhost').searchParams.get('q') ?? '',
+        response,
+      })
+      return response.promise
+    }
     if (url.endsWith('/files/orders/service.py') && method === 'GET') {
       return json({ content: 'original source' })
     }
@@ -110,6 +122,12 @@ function installServer({ failSecondFile = false } = {}) {
       return failSecondFile
         ? json({ detail: 'temporary failure' }, 503)
         : json({ content: 'other source' })
+    }
+    if (url.endsWith('/files/orders/new.py') && method === 'GET') {
+      return json({ content: 'new source' })
+    }
+    if (url.endsWith('/files/orders/new.py') && method === 'DELETE') {
+      return json({ ok: true })
     }
     if (url.includes('/files/') && method === 'PUT') {
       const response = deferred<Response>()
@@ -134,6 +152,7 @@ function installServer({ failSecondFile = false } = {}) {
         files: [
           { path: 'orders/service.py', readonly: false, edited: false },
           { path: 'orders/other.py', readonly: false, edited: false },
+          ...(includeNewFile ? [{ path: 'orders/new.py', readonly: false, edited: false, new: true }] : []),
         ],
       })
     }
@@ -141,7 +160,7 @@ function installServer({ failSecondFile = false } = {}) {
   })
 
   vi.stubGlobal('fetch', fetchMock)
-  return { saves }
+  return { fetchMock, saves, searches }
 }
 
 function renderWorkspace() {
@@ -234,5 +253,84 @@ describe('workspace reliability', () => {
     await waitFor(() => expect(saves).toHaveLength(1))
     expect(saves[0].url).toContain('/files/orders/service.py')
     saves[0].response.resolve(json({ ok: true }))
+  })
+
+  it('protects unsaved edits when deleting a created file is canceled', async () => {
+    const { fetchMock } = installServer({ includeNewFile: true })
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('button', { name: 'Files' }))
+    await user.click(screen.getByRole('button', { name: /^orders\/new\.py/ }))
+    await replaceEditorText(user, 'important unsaved work')
+    await user.click(screen.getByRole('button', { name: 'delete orders/new.py' }))
+
+    expect(confirm).toHaveBeenCalledWith('You have unsaved changes. Delete this file anyway?')
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/challenges/orders-service/files/orders/new.py',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+    expect((screen.getByRole('textbox', { name: 'code editor' }) as HTMLTextAreaElement).value).toBe('important unsaved work')
+    expect(screen.getByTitle('orders/new.py').textContent).toContain('•')
+    confirm.mockRestore()
+  })
+
+  it('keeps results from the latest search when an older request finishes last', async () => {
+    const { searches } = installServer()
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+    const input = screen.getByRole('textbox', { name: 'search challenge files' })
+    await user.type(input, 'old query{enter}')
+    await waitFor(() => expect(searches).toHaveLength(1))
+
+    await user.clear(input)
+    await user.type(input, 'new query')
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(searches).toHaveLength(2))
+    expect(searches.map(({ query }) => query)).toEqual(['old query', 'new query'])
+
+    searches[1].response.resolve(json({
+      hits: [{ path: 'orders/service.py', line: 2, text: 'new result' }],
+    }))
+    expect(await screen.findByText('new result')).toBeTruthy()
+
+    searches[0].response.resolve(json({
+      hits: [{ path: 'orders/other.py', line: 1, text: 'stale result' }],
+    }))
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(screen.queryByText('stale result')).toBeNull()
+    expect(screen.getByText('new result')).toBeTruthy()
+  })
+
+  it('recovers from structurally invalid timer JSON without rendering NaN', async () => {
+    installServer()
+    localStorage.setItem('greenline-timer-orders-service', '{}')
+    renderWorkspace()
+
+    await screen.findByDisplayValue('original source')
+    const timer = screen.getByTitle('time remaining')
+    expect(timer.textContent).not.toContain('NaN')
+    expect(timer.textContent).toMatch(/^⏱ \d+:\d{2}$/)
+  })
+
+  it('still opens the workspace when persisting recovered timer state fails', async () => {
+    installServer()
+    localStorage.setItem('greenline-timer-orders-service', 'null')
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('storage disabled', 'SecurityError')
+    })
+
+    renderWorkspace()
+
+    expect(await screen.findByDisplayValue('original source')).toBeTruthy()
+    expect((await screen.findByTitle('time remaining')).textContent).not.toContain('NaN')
+    setItem.mockRestore()
   })
 })
