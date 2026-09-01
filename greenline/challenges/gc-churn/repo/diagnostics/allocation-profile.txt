@@ -1,0 +1,8 @@
+Endpoint: GET /accounts/{id}/activity?limit=50
+Sample: 210,000 historical events
+
+activity_feed.py:28 render_event        210,000 calls   612 MiB allocated
+activity_feed.py:36 list comprehension  210,000 dicts   188 MiB retained until return
+gc.collect                              41% request CPU
+
+Response rows: 50

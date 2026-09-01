@@ -1,0 +1,11 @@
+{
+  "order": 45,
+  "title": "cdc-slot",
+  "type": "Database Engineering",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "A fast CDC consumer advances global retention past a slow slot, while acknowledgements can skip changes that were never delivered.",
+  "brief": "A simulated change log serves independent search and analytics consumers. When search catches up, compaction deletes changes analytics has not processed. A client can also acknowledge an arbitrary future sequence and make its own gap permanent.\n\nTreat each slot's delivered and acknowledged positions as durable database state. Retention may remove a change only after every active slot acknowledges it.\n\n**Your job:** fence acknowledgements to delivered ranges, keep progress monotonic, and compact at the slowest active slot without penalizing dropped consumers.",
+  "readonly": ["tests/"]
+}

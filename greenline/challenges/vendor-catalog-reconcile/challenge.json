@@ -1,0 +1,11 @@
+{
+  "order": 38,
+  "title": "vendor-catalog-reconcile",
+  "type": "Repository Implementation",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Configured imports drop tax fields, duplicate the same product across vendors, and let stale rows overwrite newer catalog data.",
+  "brief": "A procurement adapter imports distributor feeds, spreadsheets, and an internal catalog into one canonical product list. Mapping silently drops valid fields, identity matching is tied to source IDs, and stale rows overwrite newer descriptions.\n\nRead the fixtures and tests before editing `catalog/importer.py`.\n\n**Your job:** keep mapping and reconciliation explicit, preserve all provenance, merge transitive identities, and resolve fields by recency deterministically.",
+  "readonly": ["tests/", "fixtures/"]
+}

@@ -1,0 +1,11 @@
+{
+  "order": 7,
+  "title": "report-latency",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Customer reports are correct on small accounts but time out in production. The profiler dump is in diagnostics/ — start there.",
+  "brief": "The billing team’s nightly **customer spend report** is correct for tiny fixtures but **times out** on production-sized order lists. SRE captured a text profiler dump before the job was killed.\n\n**Start with the evidence.** Read `diagnostics/profiler.txt` and `diagnostics/sre-notes.md` before diving into `report/`. They name the hot frames — and one frame that is *not* the problem.\n\nThe tests encode two post-fix invariants:\n\n1. Report totals stay correct on a small fixture.\n2. Building a report over thousands of orders may only make a **small constant number of full passes** over the order list (no per-customer full scans).\n\n`tests/` and `diagnostics/` are read-only.\n\n**Your job:** find the algorithmic root cause, fix `report/service.py`, get green. No new files.",
+  "readonly": ["tests/", "diagnostics/"]
+}

@@ -1,0 +1,11 @@
+{
+  "order": 15,
+  "title": "metrics-rollups",
+  "type": "Repository Implementation",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Minute rollups split at the wrong boundary, late points vanish, and new metric names grow without limit.",
+  "brief": "This in-memory metrics store rolls timestamped samples into fixed UTC buckets. Production dashboards disagree across instances, delayed samples never appear, and a tenant can create unbounded metric names.\n\nRead `README.md` for the exact retention, future-sample, and cardinality contract, then run the tests. Time is injected: do not read the wall clock directly.\n\n**Your job:** align buckets to the Unix epoch, accept late-arriving points that are still retained, reject future-dated points, calculate independent min/max/average/count rollups per metric, and enforce the active-metric limit. Make all tests green without changing the public API.",
+  "readonly": ["tests/"]
+}

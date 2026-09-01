@@ -1,0 +1,5 @@
+{
+  "distributor": {"code": "sku", "barcode": "gtin", "label": "description", "tax": "tax_code"},
+  "spreadsheet": {"vendor_sku": "sku", "gtin13": "gtin", "name": "description", "tax_class": "tax_code"},
+  "internal": {"sku": "sku", "gtin": "gtin", "description": "description", "tax_code": "tax_code"}
+}

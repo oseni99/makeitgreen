@@ -1,0 +1,11 @@
+{
+  "order": 25,
+  "title": "workspace-replica-router",
+  "type": "Database Engineering",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Replica offload makes workspace confirmation pages stale; routing everything to primary would erase the scalability benefit.",
+  "brief": "Workspace reads normally use an asynchronous replica. Each committed primary write returns a monotonic position, and tests advance replica application explicitly. Users currently fail to read their own recent renames.\n\nRepair `workspace_data/router.py` without changing the cluster API. Preserve replica reads for unrelated sessions and return to the replica as soon as it satisfies the calling session's dependency.\n\n**Your job:** implement session-scoped read-after-write routing with an observable source and a safe unavailable-replica fallback.",
+  "readonly": ["tests/"]
+}

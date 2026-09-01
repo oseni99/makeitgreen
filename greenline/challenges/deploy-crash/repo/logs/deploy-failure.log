@@ -1,0 +1,7 @@
+2026-08-30T02:14:08Z INFO deploy release=2026.08.30 revision=9c31d2a
+2026-08-30T02:14:10Z INFO instance=notifications-7f8d starting command="python -m deploy"
+2026-08-30T02:14:10Z ERROR instance=notifications-7f8d process exited code=1 before health check
+2026-08-30T02:14:12Z INFO instance=notifications-7f8d restart attempt=2
+2026-08-30T02:14:12Z ERROR instance=notifications-7f8d process exited code=1 before health check
+2026-08-30T02:15:01Z WARN rollout unavailable=100% previous_revision_scaled_down=true
+2026-08-30T02:16:44Z INFO release-note "rename deploy.settings to deploy.config"

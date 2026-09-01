@@ -1,0 +1,11 @@
+{
+  "order": 42,
+  "title": "retry-storm",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "A webhook client retries every failure immediately, multiplying a partner outage and ignoring server backpressure.",
+  "brief": "A partner degradation became a retry storm: request volume tripled within milliseconds, permanent 400 responses were retried, and `Retry-After` was ignored. The transport is synchronous and dependency-free.\n\nStart with `logs/incident.log` and `runbook.md`. Tests provide a fake sleeper, so no real waiting is necessary. Preserve the public return value and expose permanent rejection distinctly from exhausted transient retries.\n\n**Your job:** classify retryable responses, honor server backpressure, and apply bounded exponential backoff without an off-by-one attempt.",
+  "readonly": ["tests/", "logs/", "runbook.md"]
+}

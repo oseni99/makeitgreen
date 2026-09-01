@@ -1,0 +1,11 @@
+{
+  "order": 9,
+  "title": "log-aggregator",
+  "type": "Repository Implementation",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "An on-call log rollup is counting WARN lines as errors and dropping events on the window boundary. Read the tests, fix the aggregator.",
+  "brief": "SRE built a tiny log aggregator for paging: ingest structured lines, then return **ERROR** counts per service inside a sliding time window.\n\nLog line format (space-separated, message may contain spaces):\n\n```\n2026-08-29T03:10:00Z LEVEL service message words...\n```\n\nTwo bugs are burning on-call:\n\n1. **WARN** lines are being counted — only **ERROR** should increment the rollup.\n2. Events exactly at the **start** of the window (`end - window_seconds`) are dropped — the window should be **inclusive** on both ends.\n\nThe tests in `tests/test_aggregator.py` encode the contract. Read them like a spec.\n\n**Your job:** fix `aggregator/window.py` until every test is green.",
+  "readonly": ["tests/"]
+}

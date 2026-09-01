@@ -1,0 +1,11 @@
+{
+  "order": 34,
+  "title": "device-command-webhook",
+  "type": "API Contract Debugging",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "At-least-once device webhooks arrive out of order, so retries repeat effects and future results overwrite missing predecessors.",
+  "brief": "An IoT control API receives command-result webhooks with a delivery ID and per-device sequence. Deliveries retry and reorder in transit. The current handler applies every unseen event immediately, allowing sequence gaps and stale events to corrupt device state.\n\nRead the API tests before editing `webhooks/app.py`.\n\n**Your job:** separate delivery idempotency from per-device ordering, defer gaps, drain contiguous results, and reject conflicting reuse of an ID atomically.",
+  "readonly": ["tests/"]
+}

@@ -1,0 +1,11 @@
+{
+  "order": 35,
+  "title": "enrichment-timeout-incident",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Optional search enrichment stalls for minutes, consumes worker capacity, and turns a dependency slowdown into an outage.",
+  "brief": "Search enrichment began stalling after a downstream deploy. The incident evidence shows successful requests taking minutes until every worker slot was occupied and health checks failed.\n\nStart with `logs/incident.log` and `diagnostics/capacity.txt`, then inspect `search/service.py`. Time and the downstream client are deterministic.\n\n**Your job:** enforce the 750 ms enrichment budget, return useful base results on timeout, and preserve genuine overload behavior.",
+  "readonly": ["tests/", "logs/", "diagnostics/", "runbook.md"]
+}

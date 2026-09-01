@@ -1,0 +1,11 @@
+{
+  "order": 4,
+  "title": "incident-alerts",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "checkout-api burned its error budget for five minutes and nobody got paged. The logs are in the repo. Start there.",
+  "brief": "On 2026-08-29 at 03:14 UTC, `checkout-api` error_rate spiked to 51%. The `checkout-high-errors` rule — page if **max** error_rate over the last 5 minutes **exceeds 0.50** — should have fired. On-call got nothing. SLO burn, silent pager.\n\n**Start with the logs.** Do not open the alerting package until you have read them. `logs/incident-2026-08-29.log` is the structured app log from that night; `logs/traceback.txt` is the stack the evaluator dumped. They name the files, the exception, and a second failure that showed up when SRE replayed the window.\n\nThe tests in `tests/test_incident.py` encode the post-fix invariant: ingest those same samples, evaluate at `2026-08-29T03:14:00Z`, and a page must fire. `tests/` and `logs/` are read-only — don't \"fix\" the incident by editing evidence.\n\n**Your job:** find the root cause, fix the existing alerting code (no new files), get green.",
+  "readonly": ["tests/", "logs/"]
+}

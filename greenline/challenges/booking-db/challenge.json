@@ -1,0 +1,11 @@
+{
+  "order": 5,
+  "title": "booking-db",
+  "type": "Database Engineering",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "A SQLite ticket booth is double-booking the last seat, forgetting to restore inventory on cancel, and letting the same fan book twice.",
+  "brief": "This service books seats for live shows against a real SQLite database. Ops has three integrity incidents:\n\n1. When the last seat goes on sale, **two customers sometimes both get a confirmation** — and `seats_left` goes negative.\n2. Cancelling a booking **deletes the row but never puts the seats back**.\n3. The same `user_id` can hold **two bookings for the same show**.\n\nThe tests in `tests/test_booking.py` encode the invariants. Read them like a schema review.\n\n**Your job:** fix `booking/db.py` and `booking/service.py` until every invariant holds under concurrency. Don't change the tests.",
+  "readonly": ["tests/"]
+}

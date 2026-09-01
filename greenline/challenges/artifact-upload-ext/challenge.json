@@ -1,0 +1,12 @@
+{
+  "order": 27,
+  "title": "artifact-upload-ext",
+  "type": "Architecture Extension",
+  "difficulty": "Hard",
+  "minutes": 45,
+  "language": "Python",
+  "blurb": "Add resumable, integrity-checked uploads to a content-addressed artifact store.",
+  "brief": "The build service already has a content-addressed artifact store. Extend it with resumable upload sessions without weakening the store's digest invariant. Clients may send numbered chunks out of order and retry requests after losing a response.\n\nCreate an `uploads/` package exposing `UploadService` with `begin`, `put_chunk`, `status`, `finalize`, and `cancel`. Chunk retries must be idempotent only when bytes and digest match. Finalization must reject gaps, conflicts, wrong sizes, and wrong full-file digests while leaving the session correctable. Successful sessions become terminal and deduplicate through the existing store.\n\n**Your job:** design a persistent session state machine that remains correct across service reconstruction and ambiguous client retries.",
+  "readonly": ["tests/", "artifacts/"],
+  "creatable": ["uploads/"]
+}

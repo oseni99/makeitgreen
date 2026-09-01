@@ -1,0 +1,11 @@
+{
+  "order": 22,
+  "title": "invoice-delivery-worker",
+  "type": "Concurrency",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "At-least-once invoice commands duplicate customer deliveries, retry in hot loops, and never reach their terminal failure queue.",
+  "brief": "Workers deliver finalized invoices to customer accounting integrations. The queue is at-least-once, so redelivery and duplicate commands are normal. Production found three failures: duplicate invoices, immediate retry storms, and commands that circulate forever.\n\nThe queue, sink, and clock are deterministic test doubles. Read their contracts before changing `invoice_delivery/worker.py`; do not add sleeps or serialize all workers behind a global application lock.\n\n**Your job:** make effects idempotent, acknowledge only after safe processing, schedule exponential retries, and park a command after its fifth failed attempt.",
+  "readonly": ["tests/"]
+}

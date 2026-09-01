@@ -1,0 +1,11 @@
+{
+  "order": 41,
+  "title": "auth-tenant-leak",
+  "type": "API Contract Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "An authenticated support API scopes list results but leaks tickets through direct lookups and an ID-only cache.",
+  "brief": "The support API correctly lists tickets by workspace, yet a customer discovered that a known ticket ID can be fetched from another workspace. After one legitimate read, the leak persists through the process cache. Viewers can also mutate ticket titles.\n\nRead `docs/authorization.md`, then inspect lookup and cache ownership in `support_api.py`. Preserve the public result shapes and return absence rather than revealing that a foreign ticket exists.\n\n**Your job:** enforce tenant scope at the data boundary, partition cached values by tenant, and honor the route capability matrix.",
+  "readonly": ["tests/", "docs/"]
+}

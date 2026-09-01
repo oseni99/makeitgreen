@@ -1,0 +1,10 @@
+2026-08-31T02:16:59Z INFO  worker starting queue=device-telemetry
+2026-08-31T02:17:00Z INFO  applying event_id=evt-100 device=sensor-a
+2026-08-31T02:17:00Z INFO  applying event_id=evt-poison-7
+2026-08-31T02:17:00Z ERROR payload decode failed event_id=evt-poison-7 offset=1842
+2026-08-31T02:17:01Z WARN  worker exited; supervisor restart=1 queue_lag=38
+2026-08-31T02:17:02Z INFO  applying event_id=evt-poison-7
+2026-08-31T02:17:02Z ERROR payload decode failed event_id=evt-poison-7 offset=1842
+2026-08-31T02:17:03Z WARN  worker exited; supervisor restart=2 queue_lag=61
+2026-08-31T02:17:04Z INFO  applying event_id=evt-poison-7
+2026-08-31T02:17:04Z ERROR payload decode failed event_id=evt-poison-7 offset=1842

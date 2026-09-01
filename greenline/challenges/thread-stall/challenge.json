@@ -1,0 +1,11 @@
+{
+  "order": 14,
+  "title": "thread-stall",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "The report API flatlines at two concurrent requests while CPU sits idle. Start with the thread dump, not the code.",
+  "brief": "Production's report endpoint stops completing as soon as two requests overlap. CPU stays near zero, no database calls are running, and the request queue grows until clients time out.\n\n**Start with `diagnostics/`.** The captured thread dump and SRE notes describe what every worker was doing during the stall. Treat them as evidence: `tests/` and `diagnostics/` are read-only.\n\n**Your job:** identify why the request pool starves, fix the existing implementation, and keep the bounded worker pool. Do not paper over the issue by increasing timeouts or adding workers.",
+  "readonly": ["tests/", "diagnostics/"]
+}

@@ -1,0 +1,24 @@
+report-api thread dump — 2026-08-30T09:18:11Z
+
+"report-worker_0" tid=0x21 WAITING
+  concurrent/futures/_base.py:451 in result
+  reporting/service.py:55 in _build_report
+    display_name = profile.result(timeout=self._wait_seconds)
+  work item: request user=acct-101
+
+"report-worker_1" tid=0x22 WAITING
+  concurrent/futures/_base.py:451 in result
+  reporting/service.py:55 in _build_report
+    display_name = profile.result(timeout=self._wait_seconds)
+  work item: request user=acct-202
+
+executor report-pool
+  max_workers: 2
+  active_workers: 2
+  queued_work_items:
+    - profile lookup user=acct-101
+    - profile lookup user=acct-202
+
+"MainThread" tid=0x01 WAITING
+  concurrent/futures/_base.py:451 in result
+  reporting/service.py:36 in reports_for

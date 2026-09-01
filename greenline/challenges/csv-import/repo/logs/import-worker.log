@@ -1,0 +1,5 @@
+2026-08-30T02:00:01Z import started partner=acme file=customers.csv
+2026-08-30T02:00:01Z import crashed ValueError="invalid literal for int() with base 10: 'unknown'"
+2026-08-30T02:00:31Z import retrying partner=acme file=customers.csv
+2026-08-30T02:00:31Z import crashed ValueError="invalid literal for int() with base 10: 'unknown'"
+2026-08-30T02:04:10Z import failed partner=globex error="missing external_id" encoding=utf-8-bom

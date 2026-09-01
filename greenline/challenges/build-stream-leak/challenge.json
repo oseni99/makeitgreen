@@ -1,0 +1,11 @@
+{
+  "order": 26,
+  "title": "build-stream-leak",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Use lifecycle evidence to stop closed build streams from leaking through an event hub.",
+  "brief": "A CI dashboard opens live build streams through a process-wide event hub. Closed streams disappear from the service registry, yet heap snapshots show them retained by callback references and subscriber counts grow without bound.\n\nRepair the stream lifecycle. Closing and partially initialized streams must unregister exactly once, active streams must still receive matching events, and publishing concurrently with close must remain safe. Preserve the bounded event history and the existing public API.\n\n**Your job:** use the supplied diagnostics and deterministic tests to fix ownership and cleanup without timing-based workarounds.",
+  "readonly": ["tests/", "diagnostics/"]
+}

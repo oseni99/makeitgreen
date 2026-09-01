@@ -1,0 +1,12 @@
+{
+  "order": 43,
+  "title": "feature-flag-ext",
+  "type": "Architecture Extension",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Add a last-known-good flag client that refreshes snapshots without turning a control-plane outage into an application outage.",
+  "brief": "The application currently has a working remote flag source but no runtime client. Add `flag_runtime/` with an environment-scoped, TTL-based snapshot client. A refresh failure may use an existing last-known-good snapshot, but a cold start must surface the outage.\n\nUse the injected clock; do not start background threads or sleep. Only a fully fetched snapshot may replace the cached value, and different environments must never share snapshots.\n\n**Your job:** implement bounded-refresh flag evaluation with explicit stale fallback while preserving source errors on cold start.",
+  "readonly": ["tests/"],
+  "creatable": ["flag_runtime/"]
+}

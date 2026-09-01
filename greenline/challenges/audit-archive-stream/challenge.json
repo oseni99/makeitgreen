@@ -1,0 +1,11 @@
+{
+  "order": 36,
+  "title": "audit-archive-stream",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Hard",
+  "minutes": 35,
+  "language": "Python",
+  "blurb": "A chunked audit export still retains the complete query and every formatted record before its first upload.",
+  "brief": "An audit archiver is configured to upload 128-record chunks, yet the heap evidence shows every source row and formatted record live at the first upload. Production exports contain millions of rows.\n\nStart with `diagnostics/heap-summary.txt` and `diagnostics/allocation-trace.txt`, then inspect `archive/exporter.py`. Output bytes are already correct.\n\n**Your job:** preserve order and exact output while making traversal one-pass, bounded, and prompt on sink failure.",
+  "readonly": ["tests/", "diagnostics/"]
+}

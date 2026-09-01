@@ -1,0 +1,5 @@
+Search worker capacity: 8
+Enrichment latency before deploy: p99 118 ms
+Enrichment latency after deploy: 300000 ms
+Configured optional-enrichment budget: 750 ms
+Base search remained healthy throughout the incident.

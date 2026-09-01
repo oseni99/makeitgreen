@@ -1,0 +1,12 @@
+{
+  "order": 13,
+  "title": "cache-ext",
+  "type": "Architecture Extension",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "The catalog repository works but repeats expensive reads. Add an injected-clock TTL cache and invalidate it without coupling storage to cache internals.",
+  "brief": "The product catalog repository is correct, but every repeated `get()` hits its backing store. Extend it with an optional in-memory TTL cache.\n\nConstraints:\n\n1. Create a new `cache/` package containing `TTLCache`; use the FILES tab **+ new file** control (allowed under `cache/`).\n2. Inject a clock into the cache. Tests advance fake time; do not sleep or call wall-clock time directly in cache logic.\n3. Repeated reads before expiry must hit backing storage once. At expiry, the next read must refresh.\n4. `save()` and `delete()` must invalidate the affected key so stale products are never returned.\n5. Cache wiring is optional: existing callers and repository behavior must remain green. Keep generic cache mechanics out of `catalog/`.\n\nRead `README.md` and the existing repository/tests before editing.\n\n**Your job:** add the cache package, wire it through the repository boundary, and make every test green.",
+  "readonly": ["tests/"],
+  "creatable": ["cache/"]
+}

@@ -1,0 +1,11 @@
+{
+  "order": 37,
+  "title": "thumbnail-handoff",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Thumbnail workers disappear on spurious wakeups and remain parked because queue closure wakes only one consumer.",
+  "brief": "Parser threads hand thumbnail tasks to workers through a condition-backed queue. Thread evidence shows consumers parked after shutdown, while rare runs lose a worker after a wakeup with no task.\n\nStart with `diagnostics/threads.txt`, then inspect `handoff/queue.py`. The tests coordinate threads with events rather than timing sleeps.\n\n**Your job:** make waiting predicate-based, drain accepted tasks exactly once, and broadcast terminal state so shutdown joins cleanly.",
+  "readonly": ["tests/", "diagnostics/"]
+}

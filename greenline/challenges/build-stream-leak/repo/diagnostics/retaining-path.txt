@@ -1,0 +1,6 @@
+GC root
+  -> process EventHub
+  -> EventHub._subscribers[token]
+  -> bound method BuildStream._receive
+  -> BuildStream instance
+  -> BuildStream._events deque

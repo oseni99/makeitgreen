@@ -1,0 +1,9 @@
+2026-08-30T22:14:08Z audit-export pool_size=4 available=0 checked_out=4 waiters=17
+
+connection 0  state=active   last_action=permission_check project=project-private
+connection 1  state=failed   last_action=stream_rows project=project-query-error
+connection 2  state=active   last_action=client_cancelled project=project-a
+connection 3  state=active   last_action=permission_check project=project-private
+
+Raising acquire_timeout from 2s to 10s increased request latency but did not restore
+capacity. No database saturation was observed.

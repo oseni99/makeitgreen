@@ -1,0 +1,18 @@
+Customer spend report — cProfile text dump (truncated)
+Captured 2026-08-30T02:11:04Z before the job was SIGKILL'd at 120s
+
+Ordered by: cumulative time
+
+ncalls     tottime  cumtime  filename:lineno(function)
+      1      0.002  118.441  report/service.py:12(build_customer_report)
+   6128     41.220  116.890  report/service.py:31(_orders_for_customer)
+   6128     75.670   75.670  report/service.py:31(<listcomp>)
+      1      0.410    0.410  json.py:dumps  (serialize report for S3 upload)
+      1      0.001    0.001  report/service.py:40(_empty_report)
+
+# Interpreter notes
+# _orders_for_customer is invoked once per customer_id (~6128 calls).
+# Each call's listcomp walks the entire orders list (~48k rows).
+# Rough work: 6128 * 48000 ≈ 2.9e8 membership checks — matches the ~2 min wall.
+#
+# json.dumps appears once with 0.41s — ignore for the timeout RCA.

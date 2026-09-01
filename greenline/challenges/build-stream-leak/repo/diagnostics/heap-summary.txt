@@ -1,0 +1,6 @@
+BuildStream                          2,418 instances   retained 38.7 MiB
+collections.deque                   2,418 instances   retained 34.2 MiB
+EventHub._subscribers                   1 instance     retained 38.9 MiB
+
+Subscriber count rises after each dashboard reconnect. StreamService.active_count
+returns to zero, but the corresponding BuildStream objects remain reachable.

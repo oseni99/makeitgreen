@@ -1,0 +1,11 @@
+{
+  "order": 21,
+  "title": "device-ingest-incident",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "One malformed telemetry event restarts the worker forever while healthy device traffic piles up behind it.",
+  "brief": "At 02:17 UTC the telemetry worker entered a restart loop. Queue lag is climbing, and the same event ID appears immediately before every crash.\n\nStart with `logs/worker.log`, `runbook.md`, and `fixtures/incident.ndjson`. Then reproduce the incident in the existing worker. Permanent data errors must be quarantined with a stable reason; unexpected infrastructure or programming failures must still surface.\n\n**Your job:** isolate failure to one event, drain healthy traffic in order, and preserve exactly-once device updates.",
+  "readonly": ["tests/", "logs/", "fixtures/", "runbook.md"]
+}

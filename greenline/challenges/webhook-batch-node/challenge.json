@@ -1,0 +1,16 @@
+{
+  "order": 29,
+  "title": "webhook-batch-node",
+  "type": "Repository Implementation",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "JavaScript",
+  "blurb": "A Node.js webhook batcher mixes tenants, misses the size boundary, and loses failed deliveries before retry.",
+  "brief": "A dependency-free Node.js service batches webhook events per tenant. Production found cross-tenant deliveries, batches that grow one event beyond their configured maximum, and event loss whenever the sender throws.\n\nRead the built-in `node:test` contract before editing `src/batcher.js`. Preserve per-tenant input order and do not hide delivery failures.\n\n**Your job:** isolate queues by tenant, flush at the exact boundary, and remove events only after successful delivery.",
+  "readonly": ["test/"],
+  "runtime": {
+    "kind": "node",
+    "command": ["node", "--test"],
+    "report": "text"
+  }
+}

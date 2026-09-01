@@ -1,0 +1,11 @@
+{
+  "order": 28,
+  "title": "subscription-renew",
+  "type": "Repository Implementation",
+  "difficulty": "Hard",
+  "minutes": 45,
+  "language": "Python",
+  "blurb": "A subscription renewal path skips invoices at the billing boundary, misprices credits, double-charges retries, and corrupts state after declines.",
+  "brief": "A billing service renews seat-based subscriptions through a deterministic payment gateway. Several individually small bugs interact: invoices at the exact billing instant are skipped, credits and discounts are applied in the wrong order, client retries can charge twice, and a declined payment advances subscription state.\n\nRead the repository, gateway, and tests before editing `subscriptions/service.py`. Preserve the public API and do not weaken the assertions.\n\n**Your job:** make renewal pricing exact, retry-safe, and atomic from the caller's perspective while preserving not-yet-due and zero-total behavior.",
+  "readonly": ["tests/"]
+}

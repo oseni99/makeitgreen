@@ -1,0 +1,11 @@
+{
+  "order": 18,
+  "title": "return-workflow",
+  "type": "Repository Implementation",
+  "difficulty": "Easy",
+  "minutes": 20,
+  "language": "Python",
+  "blurb": "A returns service accepts impossible lifecycle jumps and records rejected actions. Make its state machine explicit and atomic.",
+  "brief": "This service tracks merchandise returns from request through warehouse inspection and refund. Most happy-path operations work, but invalid transitions are accepted and rejected actions can corrupt the audit trail.\n\nRead the tests as the lifecycle specification, then repair `returns/service.py`. Keep the public API and exception types unchanged.\n\n**Your job:** enforce every legal branch and terminal state, and make rejected operations atomic no-ops.",
+  "readonly": ["tests/"]
+}

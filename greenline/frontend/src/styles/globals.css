@@ -1,0 +1,258 @@
+@import "tailwindcss";
+
+@utility extend-touch-target {
+  @media (pointer: coarse) {
+    @apply relative touch-manipulation after:absolute after:-inset-2;
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted-surface);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-active: var(--primary-active);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-sticker-sky: var(--sticker-sky);
+  --color-sticker-purple: var(--sticker-purple);
+  --color-sticker-pink: var(--sticker-pink);
+  --color-sticker-orange: var(--sticker-orange);
+  --color-sticker-teal: var(--sticker-teal);
+  --color-sticker-green: var(--sticker-green);
+  --color-console: var(--console);
+  --color-console-surface: var(--console-surface);
+  --color-console-foreground: var(--console-foreground);
+  --color-console-muted: var(--console-muted);
+  --color-console-success: var(--console-success);
+  --color-console-error: var(--console-error);
+  --color-console-warning: var(--console-warning);
+  --color-window-close: var(--window-close);
+  --color-window-minimize: var(--window-minimize);
+  --color-window-expand: var(--window-expand);
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --shadow-soft: 0 0.175px 1.041px rgb(0 0 0 / 0.01),
+    0 0.8px 2.925px rgb(0 0 0 / 0.02), 0 2.025px 7.847px rgb(0 0 0 / 0.027),
+    0 4px 18px rgb(0 0 0 / 0.04);
+  --shadow-elevated: 0 2px 4px rgb(0 0 0 / 0.02), 0 8px 18px rgb(0 0 0 / 0.035),
+    0 23px 52px rgb(0 0 0 / 0.05);
+}
+
+:root {
+  --background: #f6f5f4;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --muted-surface: #efeeec;
+  --muted-foreground: #615d59;
+  --primary: #0075de;
+  --primary-active: #005bab;
+  --primary-foreground: #ffffff;
+  --secondary: #213183;
+  --secondary-foreground: #ffffff;
+  --border: #e6e6e6;
+  --ring: #0075de;
+  --destructive: #c9362b;
+  --destructive-foreground: #ffffff;
+  --success: #16833d;
+  --warning: #a95c00;
+  --sticker-sky: #62aef0;
+  --sticker-purple: #d6b6f6;
+  --sticker-pink: #ff64c8;
+  --sticker-orange: #dd5b00;
+  --sticker-teal: #2a9d99;
+  --sticker-green: #1aae39;
+  --console: #0a0e0c;
+  --console-surface: #0e1110;
+  --console-foreground: #d9e8dd;
+  --console-muted: #7f8782;
+  --console-success: #77f5a8;
+  --console-error: #ff6b66;
+  --console-warning: #ffc36d;
+  --window-close: #ff5f57;
+  --window-minimize: #febc2e;
+  --window-expand: #28c840;
+  --editor-background: #0a0e0c;
+  --editor-foreground: #d9e8dd;
+  --editor-comment: #55675e;
+  --editor-string: #77f5a8;
+  --editor-keyword: #ffb454;
+  --editor-number: #a8e6c2;
+  --editor-line-number: #3a4a41;
+  --editor-line-highlight: #10171322;
+  --editor-cursor: #46f28a;
+  --editor-selection: #27754a55;
+  --editor-diff-inserted-text: #46f28a1f;
+  --editor-diff-removed-text: #ff5c5726;
+  --editor-diff-inserted-line: #46f28a10;
+  --editor-diff-removed-line: #ff5c5712;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-width: 320px;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  body::before,
+  body::after {
+    display: none;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
+    color: var(--foreground);
+  }
+}
+
+@layer components {
+  .prose-greenline {
+    color: var(--muted-foreground);
+    font-size: 0.9375rem;
+    line-height: 1.7;
+  }
+
+  .prose-greenline h1,
+  .prose-greenline h2,
+  .prose-greenline h3 {
+    margin-block: 2.25rem 0.75rem;
+    color: var(--foreground);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .prose-greenline h2 {
+    font-size: 1.625rem;
+  }
+
+  .prose-greenline h3 {
+    font-size: 1.375rem;
+  }
+
+  .prose-greenline code {
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--card);
+    padding: 0.1rem 0.35rem;
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+
+  .prose-greenline pre {
+    overflow-x: auto;
+    border-radius: 0.75rem;
+    background: var(--console);
+    padding: 1rem;
+    color: var(--console-foreground);
+  }
+
+  .prose-greenline pre code {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+  }
+
+  .workspace-prose {
+    color: var(--muted-foreground);
+    font-size: 0.8125rem;
+    line-height: 1.65;
+  }
+
+  .workspace-prose h1,
+  .workspace-prose h2,
+  .workspace-prose h3 {
+    margin-block: 1.5rem 0.5rem;
+    color: var(--foreground);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+
+  .workspace-prose h1:first-child,
+  .workspace-prose h2:first-child,
+  .workspace-prose h3:first-child {
+    margin-top: 0;
+  }
+
+  .workspace-prose h1 {
+    font-size: 1.25rem;
+  }
+
+  .workspace-prose h2 {
+    font-size: 1.125rem;
+  }
+
+  .workspace-prose h3 {
+    font-size: 1rem;
+  }
+
+  .workspace-prose p,
+  .workspace-prose ul,
+  .workspace-prose ol {
+    margin-block: 0.75rem;
+  }
+
+  .workspace-prose ul,
+  .workspace-prose ol {
+    padding-left: 1.25rem;
+  }
+
+  .workspace-prose ul {
+    list-style: disc;
+  }
+
+  .workspace-prose ol {
+    list-style: decimal;
+  }
+
+  .workspace-prose code {
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--muted-surface);
+    padding: 0.1rem 0.3rem;
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "order": 8,
+  "title": "transfer-deadlock",
+  "type": "Concurrency",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Peer transfers work one at a time, but opposite A→B and B→A transfers hang forever under load. Classic lock ordering.",
+  "brief": "This transfer service moves money between named accounts. Single-threaded transfers pass, but finance's soak test deadlocks when two workers move money in opposite directions at the same time.\n\nRun the tests. `test_concurrent_opposite_transfers` starts two threads — one moves **alice → bob**, the other **bob → alice** — and expects both to finish with balances unchanged. Instead the threads hang.\n\n**Your job:** fix the locking in `transfer/service.py` so opposite-direction transfers can't deadlock. Keep unrelated account pairs able to transfer in parallel.",
+  "readonly": ["tests/"]
+}

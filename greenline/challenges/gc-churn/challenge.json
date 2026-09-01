@@ -1,0 +1,11 @@
+{
+  "order": 44,
+  "title": "gc-churn",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "A bounded activity feed renders every historical event before slicing, creating allocation spikes and long GC pauses.",
+  "brief": "The dashboard returns only the newest items, but allocation profiles show every historical event being expanded into a response dictionary first. Large accounts spend more time collecting temporary objects than serving requests.\n\nRead `diagnostics/allocation-profile.txt` and `diagnostics/sre-notes.md`. Preserve newest-first ordering with deterministic ID tie-breaking and support one-pass iterables.\n\n**Your job:** bound expensive rendering work to the requested limit without changing the feed result.",
+  "readonly": ["tests/", "diagnostics/"]
+}

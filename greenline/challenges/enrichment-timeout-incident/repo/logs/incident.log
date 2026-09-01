@@ -1,0 +1,5 @@
+2026-08-30T14:04:01Z dependency=catalog-enrichment deploy=v184 state=healthy
+2026-08-30T14:04:18Z request=srch-884 source=live status=200 latency_ms=300112
+2026-08-30T14:05:02Z pool=inflight used=8 capacity=8 health=saturated
+2026-08-30T14:05:03Z request=srch-911 status=503 error=overloaded
+2026-08-30T14:05:05Z load_balancer action=remove_instance reason=health_failed

@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/opt/alerting/alerting/evaluator.py", line 21, in evaluate
+    window = samples_in_window(scoped, start, now)
+  File "/opt/alerting/alerting/windows.py", line 15, in samples_in_window
+    return [s for s in samples if start <= s.ts < end]
+                                  ^^^^^^^^^^^^^^^^^^^
+TypeError: can't compare offset-naive and offset-aware datetimes

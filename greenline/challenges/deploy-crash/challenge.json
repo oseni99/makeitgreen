@@ -1,0 +1,11 @@
+{
+  "order": 11,
+  "title": "deploy-crash",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "A successful deploy leaves every new instance crash-looping before it can report healthy.",
+  "brief": "The latest release passed CI, but the production rollout never produced a healthy instance.\n\n**Explore before editing:** start with `logs/deploy-failure.log` and `logs/startup-traceback.txt`, then trace the boot path. The failure must remain observable; do not hide it behind a broad exception or a silent fallback.\n\n**Your job:** repair the stale boot configuration while preserving explicit environment overrides and the service's working health behavior.",
+  "readonly": ["tests/", "logs/"]
+}

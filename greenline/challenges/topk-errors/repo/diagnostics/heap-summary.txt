@@ -1,0 +1,7 @@
+telemetry-worker-17  retained objects by owner
+
+topk.tracker.ErrorTracker._counts       4,821,773 entries   612.4 MiB
+decoded input buffers                         128 entries     1.8 MiB
+export batch                                  500 entries   640.0 KiB
+
+RSS grows with distinct service tag values and does not fall after export.

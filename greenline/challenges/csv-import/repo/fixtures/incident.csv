@@ -1,0 +1,4 @@
+external_id,email,age
+cust-1,ada@example.com,36
+cust-2,broken-address,unknown
+cust-3,grace@example.com,42

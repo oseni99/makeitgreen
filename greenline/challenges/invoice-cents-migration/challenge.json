@@ -1,0 +1,11 @@
+{
+  "order": 24,
+  "title": "invoice-cents-migration",
+  "type": "Database Engineering",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "A live cents migration skips invoices, advances progress after partial work, and leaves new writes in the legacy shape.",
+  "brief": "The invoicing database is expanding from decimal-string totals to integer cent columns. The nullable columns already exist, but the background backfill runs while production continues writing invoices.\n\nThe current writer is not forward-compatible, and the migration uses changing-result offsets with autocommitted row updates. Read the tests before changing `billing/service.py`; the destructive contract phase is intentionally out of scope.\n\n**Your job:** dual-write new invoices, migrate old rows in atomic keyset batches, survive retries and sparse IDs, and verify the data before declaring completion.",
+  "readonly": ["tests/"]
+}

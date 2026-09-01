@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+
+
+@dataclass(frozen=True)
+class Caller:
+    tenant_id: str
+    role: str
+
+
+@dataclass(frozen=True)
+class Ticket:
+    id: str
+    tenant_id: str
+    title: str
+
+
+class TicketStore:
+    def __init__(self, tickets: list[Ticket]):
+        self._tickets = {ticket.id: ticket for ticket in tickets}
+
+    def list_for(self, tenant_id: str) -> list[Ticket]:
+        return [ticket for ticket in self._tickets.values() if ticket.tenant_id == tenant_id]
+
+    def get_for(self, tenant_id: str, ticket_id: str) -> Ticket | None:
+        ticket = self._tickets.get(ticket_id)
+        if ticket is None or ticket.tenant_id != tenant_id:
+            return None
+        return ticket
+
+    def save(self, ticket: Ticket) -> None:
+        self._tickets[ticket.id] = ticket
+
+
+class SupportService:
+    def __init__(self, store: TicketStore):
+        self._store = store
+        self._cache: dict[tuple[str, str], Ticket] = {}
+
+    def list_tickets(self, caller: Caller) -> list[Ticket]:
+        return self._store.list_for(caller.tenant_id)
+
+    def get_ticket(self, caller: Caller, ticket_id: str) -> Ticket | None:
+        key = (caller.tenant_id, ticket_id)
+        if key not in self._cache:
+            ticket = self._store.get_for(caller.tenant_id, ticket_id)
+            if ticket is not None:
+                self._cache[key] = ticket
+        return self._cache.get(key)
+
+    def rename_ticket(self, caller: Caller, ticket_id: str, title: str) -> Ticket | None:
+        if caller.role != "agent":
+            return None
+        ticket = self._store.get_for(caller.tenant_id, ticket_id)
+        if ticket is None:
+            return None
+        updated = replace(ticket, title=title)
+        self._store.save(updated)
+        self._cache[(caller.tenant_id, ticket_id)] = updated
+        return updated

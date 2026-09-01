@@ -1,0 +1,11 @@
+{
+  "order": 12,
+  "title": "outbox-publish",
+  "type": "Database Engineering",
+  "difficulty": "Hard",
+  "minutes": 35,
+  "language": "Python",
+  "blurb": "Orders commit without their events, and the outbox republishes successful deliveries forever. Restore atomic writes and retry-safe publication.",
+  "brief": "Checkout writes orders to SQLite and a background worker publishes `order.created` events. Production has two conflicting symptoms: some committed orders never emit an event, while others emit the same event repeatedly after every worker poll.\n\nRead `README.md`, then trace `commerce/service.py`, `commerce/store.py`, and `commerce/worker.py`. The tests use an in-process fake publisher; no broker or network is involved.\n\nRequired invariants:\n\n1. The business row and outbox row commit **atomically**. If enqueueing fails, neither may remain.\n2. Repeating the same create command is idempotent: one order, one stable outbox event.\n3. A failed publish remains pending and can be retried.\n4. A successful publish sets `published_at`; later polls must not publish it again.\n5. Keep existing validation, lookup, and FIFO behavior green.\n\n**Your job:** repair the transaction boundary and publication state machine without changing the tests.",
+  "readonly": ["tests/"]
+}

@@ -1,0 +1,11 @@
+{
+  "order": 17,
+  "title": "topk-errors",
+  "type": "Runtime Diagnostics",
+  "difficulty": "Hard",
+  "minutes": 35,
+  "language": "Python",
+  "blurb": "A telemetry worker retains one counter per service until it is OOM-killed. Bound memory while preserving useful heavy hitters.",
+  "brief": "A telemetry worker reports the services generating the most ERROR events. Its results look correct, but the process is repeatedly OOM-killed as high-cardinality service identifiers arrive.\n\n**Start with the evidence:** read `diagnostics/heap-summary.txt` and `diagnostics/sre-notes.md`.\n\nThis is a single-pass stream, so exact top-K over unbounded cardinality cannot use bounded memory. The contract therefore permits approximate counts while requiring that clearly dominant services remain in the result. `capacity` is the hard maximum number of counters retained; `k` is the number returned.\n\n**Your job:** replace the unbounded counter map in `topk/tracker.py` with a bounded heavy-hitter algorithm. Keep exact behavior while distinct services fit within capacity, ignore non-ERROR events, and use deterministic tie-breaking.",
+  "readonly": ["tests/", "diagnostics/"]
+}

@@ -1,0 +1,5 @@
+22:13:51 export denied user=guest project=project-private status=403
+22:13:55 export query failed user=analyst project=project-query-error error=statement_failed
+22:14:01 export cancelled user=analyst project=project-a rows_sent=1
+22:14:05 export denied user=guest project=project-private status=403
+22:14:08 export failed user=owner project=project-a error=pool_acquire_timeout

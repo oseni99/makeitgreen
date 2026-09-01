@@ -1,0 +1,11 @@
+{
+  "order": 40,
+  "title": "csv-import",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "One malformed customer row aborts an overnight import and a spreadsheet BOM disguises the required identifier column.",
+  "brief": "The customer migration worker now restarts on the same partner export. Operations found one invalid age among valid customers, while another partner's UTF-8 spreadsheet export reports a missing `external_id` column.\n\nStart with `logs/import-worker.log` and `runbook.md`. The file schema is strict, but row-level data failures must be quarantined without discarding valid rows.\n\n**Your job:** distinguish file-level format failures from row-level data failures, support UTF-8 BOM input, and preserve source row numbers and stable rejection reasons.",
+  "readonly": ["tests/", "logs/", "fixtures/", "runbook.md"]
+}

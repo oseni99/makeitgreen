@@ -1,0 +1,11 @@
+{
+  "order": 31,
+  "title": "digest-scheduler",
+  "type": "Concurrency",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Concurrent workers double-claim scheduled digests, and stale lease owners can commit after reassignment.",
+  "brief": "A fleet of workers sends account digests from a shared job store. Two workers can claim the same due job, crashed claims never recover safely, and a slow worker can finish after its lease has been reassigned.\n\nRead the deterministic barrier tests before editing `scheduler/core.py`. Preserve concurrency across different jobs.\n\n**Your job:** make claims atomic and require a current, unexpired fencing generation at every delivery effect.",
+  "readonly": ["tests/"]
+}

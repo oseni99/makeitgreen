@@ -1,0 +1,11 @@
+{
+  "order": 30,
+  "title": "runbook-revisions",
+  "type": "Repository Implementation",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Collaborative incident runbooks lose immutable history, accept stale edits, and activate on the wrong schedule boundary.",
+  "brief": "An operations portal stores incident runbooks that move through draft, review, approved, active, and retired states. Stale browser tabs are overwriting newer edits, illegal lifecycle jumps are accepted, and rollback erases the audit trail.\n\nRead the service and its tests before editing `runbooks/service.py`. Keep the public API intact.\n\n**Your job:** enforce optimistic revisions, legal transitions, scheduled activation, and history-preserving rollback.",
+  "readonly": ["tests/"]
+}

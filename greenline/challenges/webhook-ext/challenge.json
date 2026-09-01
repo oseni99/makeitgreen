@@ -1,0 +1,12 @@
+{
+  "order": 6,
+  "title": "webhook-ext",
+  "type": "Architecture Extension",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "In-process event handlers work. Product wants signed outbound webhooks — add a webhooks package and wire it into the bus without stuffing HTTP into events/.",
+  "brief": "This event bus already fans events out to in-process handlers. Product wants **outbound webhooks**: register an HTTPS endpoint + secret, and every published event should POST a signed JSON body to that endpoint.\n\nConstraints (interview-style):\n\n1. Put HTTP delivery in a **new** `webhooks/` package — do not turn `events/bus.py` into an HTTP client.\n2. Sign the raw request body with **HMAC-SHA256**; send header `X-Signature: sha256=<hex>`.\n3. On **5xx** (or transport failure represented as status ≥ 500), **retry once**. Do **not** retry on 4xx.\n4. Keep existing in-process subscribe/publish behavior green.\n\nThe tests in `tests/test_webhooks.py` import `webhooks.dispatcher.WebhookDispatcher` and construct `EventBus(webhooks=...)`. Use the FILES tab **+ new file** control (allowed under `webhooks/`) to create the package, then wire the bus.\n\n**Your job:** create the package, wire publish, make every test green.",
+  "readonly": ["tests/"],
+  "creatable": ["webhooks/"]
+}

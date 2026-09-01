@@ -1,0 +1,23 @@
+# Structured app log — checkout-api SLO-burn incident, 2026-08-29.
+# Read this file and logs/traceback.txt before editing alerting/.
+
+{"ts":"2026-08-29T03:10:00Z","level":"INFO","logger":"alerting.ingest","msg":"sample ingested","service":"checkout-api","metric":"error_rate","value":0.08,"sample_ts":"2026-08-29T03:10:00Z"}
+{"ts":"2026-08-29T03:11:00Z","level":"INFO","logger":"alerting.ingest","msg":"sample ingested","service":"checkout-api","metric":"error_rate","value":0.11,"sample_ts":"2026-08-29T03:11:00Z"}
+{"ts":"2026-08-29T03:12:00Z","level":"INFO","logger":"alerting.ingest","msg":"sample ingested","service":"checkout-api","metric":"error_rate","value":0.38,"sample_ts":"2026-08-29T03:12:00Z"}
+{"ts":"2026-08-29T03:12:00Z","level":"INFO","logger":"alerting.evaluator","msg":"evaluating rule","rule":"checkout-high-errors","window_seconds":300,"threshold":0.50,"aggregator":"max","now":"2026-08-29T03:12:00+00:00"}
+{"ts":"2026-08-29T03:12:00Z","level":"ERROR","logger":"alerting.evaluator","msg":"evaluator failed; treating as no-page","rule":"checkout-high-errors","error":"can't compare offset-naive and offset-aware datetimes"}
+{"ts":"2026-08-29T03:12:00Z","level":"INFO","logger":"alerting.pager","msg":"no page","rule":"checkout-high-errors","reason":"evaluator returned None"}
+{"ts":"2026-08-29T03:13:00Z","level":"INFO","logger":"alerting.ingest","msg":"sample ingested","service":"checkout-api","metric":"error_rate","value":0.44,"sample_ts":"2026-08-29T03:13:00Z"}
+{"ts":"2026-08-29T03:13:00Z","level":"INFO","logger":"alerting.evaluator","msg":"evaluating rule","rule":"checkout-high-errors","window_seconds":300,"threshold":0.50,"aggregator":"max","now":"2026-08-29T03:13:00+00:00"}
+{"ts":"2026-08-29T03:13:00Z","level":"ERROR","logger":"alerting.evaluator","msg":"evaluator failed; treating as no-page","rule":"checkout-high-errors","error":"can't compare offset-naive and offset-aware datetimes"}
+{"ts":"2026-08-29T03:13:00Z","level":"INFO","logger":"alerting.pager","msg":"no page","rule":"checkout-high-errors","reason":"evaluator returned None"}
+{"ts":"2026-08-29T03:14:00Z","level":"INFO","logger":"alerting.ingest","msg":"sample ingested","service":"checkout-api","metric":"error_rate","value":0.51,"sample_ts":"2026-08-29T03:14:00Z"}
+{"ts":"2026-08-29T03:14:00Z","level":"INFO","logger":"alerting.evaluator","msg":"evaluating rule","rule":"checkout-high-errors","window_seconds":300,"threshold":0.50,"aggregator":"max","now":"2026-08-29T03:14:00+00:00"}
+{"ts":"2026-08-29T03:14:00Z","level":"ERROR","logger":"alerting.evaluator","msg":"evaluator failed; treating as no-page","rule":"checkout-high-errors","error":"can't compare offset-naive and offset-aware datetimes"}
+{"ts":"2026-08-29T03:14:00Z","level":"INFO","logger":"alerting.pager","msg":"no page","rule":"checkout-high-errors","reason":"evaluator returned None"}
+{"ts":"2026-08-29T03:15:00Z","level":"INFO","logger":"alerting.ingest","msg":"sample ingested","service":"checkout-api","metric":"error_rate","value":0.29,"sample_ts":"2026-08-29T03:15:00Z"}
+{"ts":"2026-08-29T03:15:00Z","level":"INFO","logger":"alerting.evaluator","msg":"evaluating rule","rule":"checkout-high-errors","window_seconds":300,"threshold":0.50,"aggregator":"max","now":"2026-08-29T03:15:00+00:00"}
+{"ts":"2026-08-29T03:15:00Z","level":"ERROR","logger":"alerting.evaluator","msg":"evaluator failed; treating as no-page","rule":"checkout-high-errors","error":"can't compare offset-naive and offset-aware datetimes"}
+{"ts":"2026-08-29T03:15:00Z","level":"INFO","logger":"alerting.pager","msg":"no page","rule":"checkout-high-errors","reason":"evaluator returned None"}
+{"ts":"2026-08-29T04:02:11Z","level":"WARN","logger":"sre.incident-review","msg":"checkout-api error_rate peaked at 0.51; checkout-high-errors never paged; on-call idle. evaluator dumped TypeError (see logs/traceback.txt) and returned no-page. fail-closed."}
+{"ts":"2026-08-29T12:18:44Z","level":"WARN","logger":"sre.incident-review","msg":"replay after forcing sample.ts to UTC-aware: window contained 4 of 5 samples; the 03:14:00 point (exactly eval now) was excluded by start <= ts < end. remaining max=0.44, under 0.50. exclusive-end drop would have missed the page even with tz fixed."}

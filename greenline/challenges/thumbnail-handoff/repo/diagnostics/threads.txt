@@ -1,0 +1,7 @@
+thumbnail-worker-0  WAITING  handoff.queue.HandoffQueue.get -> Condition.wait
+thumbnail-worker-1  WAITING  handoff.queue.HandoffQueue.get -> Condition.wait
+thumbnail-worker-2  TERMINATED (returned None before queue close)
+main                WAITING  Thread.join(thumbnail-worker-0)
+
+Queue snapshot: items=0 closed=true waiting=2
+Shutdown log: close notified 1 waiter

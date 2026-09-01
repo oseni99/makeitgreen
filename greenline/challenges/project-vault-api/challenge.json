@@ -1,0 +1,11 @@
+{
+  "order": 19,
+  "title": "project-vault-api",
+  "type": "API Contract Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "A multi-tenant document API authenticates callers but leaks files across project boundaries and ignores role permissions.",
+  "brief": "The project vault has verified user and workspace headers, but authentication is not enough. Contract tests show that callers can reach documents through the wrong project and that viewers and editors receive mutation powers they should not have.\n\nStart with `docs/policy.md`, then inspect `vault_api/app.py` and `vault_api/store.py`. Preserve the routes and response shapes.\n\n**Your job:** enforce the resource boundary at lookup time and make every route honor the role matrix without leaking protected fields in denied responses.",
+  "readonly": ["tests/", "docs/"]
+}

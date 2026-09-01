@@ -1,0 +1,11 @@
+{
+  "order": 20,
+  "title": "audit-export-pool",
+  "type": "Database Engineering",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "Expected export failures leak pooled connections and leave transactions dirty until every request times out.",
+  "brief": "Audit exports work after a deploy, then fail once several denied or cancelled requests have passed through the service. Pool telemetry shows all four connections checked out, and the captured session snapshot includes unfinished transactions.\n\nStart with `diagnostics/`, then inspect the ownership boundaries in `audit_export/service.py`. The pool is a deterministic stand-in for a production driver and is not the defect.\n\n**Your job:** make every acquired connection and transaction finish cleanly on success and on every failure path. Do not increase capacity or timeouts.",
+  "readonly": ["tests/", "diagnostics/"]
+}

@@ -1,0 +1,5 @@
+archive/exporter.py:18  list(rows)                    5,000 retained
+archive/exporter.py:19  formatter.format(row)         5,000 retained
+archive/exporter.py:21  records[offset:offset+128]      128 uploaded
+
+The source iterator is forward-only. The sink may fail during any upload.

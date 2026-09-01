@@ -1,0 +1,7 @@
+Capture point: first sink.write() during a 5,000-row export
+
+Live AuditRow objects:       5,000
+Live FormattedRecord objects: 5,000
+Configured chunk size:         128
+
+Memory returns after export completion. Retained size grows linearly with query size.

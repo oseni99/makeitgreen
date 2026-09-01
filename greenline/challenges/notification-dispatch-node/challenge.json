@@ -1,0 +1,16 @@
+{
+  "order": 33,
+  "title": "notification-dispatch-node",
+  "type": "Architecture Extension",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "JavaScript",
+  "blurb": "Extend a working FIFO notification queue with scheduled delivery and stable urgency ordering.",
+  "brief": "A working FIFO notification queue needs two new capabilities: future delivery times and urgency levels. The current extension ranks everything immediately, so a future urgent notification can jump ahead of ready work.\n\nRead the built-in `node:test` contract before editing `src/queue.js`. Time is supplied to `take(now)`; do not read the wall clock.\n\n**Your job:** choose only eligible notifications, rank them stably, and preserve the original FIFO behavior.",
+  "readonly": ["test/"],
+  "runtime": {
+    "kind": "node",
+    "command": ["node", "--test"],
+    "report": "text"
+  }
+}

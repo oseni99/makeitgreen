@@ -1,0 +1,182 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import App from '../src/App'
+import Catalog from '../src/pages/Catalog'
+import { SolutionRoute, WorkspaceRoute } from '../src/pages/KeyedRoutes'
+
+vi.mock('@monaco-editor/react', () => ({
+  default: ({ value, onChange }: { value: string; onChange?: (value: string) => void }) => (
+    <textarea
+      aria-label="code editor"
+      value={value}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  ),
+  DiffEditor: ({ original, modified }: { original: string; modified: string }) => (
+    <div aria-label="solution diff">
+      <pre>{original}</pre>
+      <pre>{modified}</pre>
+    </div>
+  ),
+}))
+
+const challenge = {
+  slug: 'orders-service',
+  title: 'orders-service',
+  type: 'Concurrency',
+  difficulty: 'Medium',
+  minutes: 25,
+  language: 'Python',
+  blurb: 'Repair the checkout race.',
+  brief: 'Make checkout atomic.',
+  progress: { status: 'todo', attempts: 0, spoiled: false },
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function installPracticeLoopServer() {
+  let source = 'def checkout():\n    return "broken"\n'
+  let runNumber = 0
+  const runs: unknown[] = []
+  const jobs = new Map<string, unknown>()
+
+  const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const method = init?.method ?? 'GET'
+
+    if (url === '/api/challenges' && method === 'GET') {
+      return json({ challenges: [challenge] })
+    }
+    if (url === '/api/challenges/orders-service' && method === 'GET') {
+      return json({
+        ...challenge,
+        progress: {
+          ...challenge.progress,
+          status: runNumber >= 2 ? 'solved' : runNumber === 1 ? 'attempted' : 'todo',
+          attempts: runNumber,
+        },
+        files: [{ path: 'orders/service.py', readonly: false, edited: runNumber >= 2 }],
+      })
+    }
+    if (url === '/api/challenges/orders-service/files/orders/service.py' && method === 'GET') {
+      return json({ content: source })
+    }
+    if (url === '/api/challenges/orders-service/files/orders/service.py' && method === 'PUT') {
+      source = JSON.parse(String(init?.body)).content
+      return json({ ok: true })
+    }
+    if (url === '/api/challenges/orders-service/runs' && method === 'GET') {
+      return json({ runs })
+    }
+    if (url === '/api/challenges/orders-service/runs' && method === 'POST') {
+      runNumber += 1
+      const green = runNumber >= 2 && source.includes('fixed')
+      const run = {
+        id: runNumber,
+        slug: challenge.slug,
+        started_at: '2026-08-31T12:00:00Z',
+        duration_ms: 20,
+        session_elapsed_ms: 1000,
+        green,
+        passed: green ? 2 : 1,
+        failed: green ? 0 : 1,
+        errors: 0,
+        skipped: 0,
+        exit_code: green ? 0 : 1,
+      }
+      runs.unshift({ ...run, output_tail: green ? '2 passed' : '1 failed, 1 passed', output_truncated: false, tests: [] })
+      const jobId = `job-${runNumber}`
+      jobs.set(jobId, { ...run, output: green ? '2 passed' : '1 failed, 1 passed', tests: [], run })
+      return json({ job_id: jobId, slug: challenge.slug, status: 'queued' })
+    }
+    if (url.startsWith('/api/run-jobs/') && method === 'GET') {
+      const jobId = url.split('/api/run-jobs/')[1].split('?')[0]
+      const result = jobs.get(jobId)
+      return json({
+        job_id: jobId,
+        slug: challenge.slug,
+        status: 'completed',
+        output: result && typeof result === 'object' && 'output' in result ? result.output : '',
+        next_offset: 20,
+        result,
+      })
+    }
+    if (url === '/api/challenges/orders-service/solution' && method === 'GET') {
+      return json({
+        writeup: '# Atomic checkout',
+        files: [
+          {
+            path: 'orders/service.py',
+            original: 'def checkout():\n    return "broken"\n',
+            content: 'def checkout():\n    return "fixed"\n',
+          },
+        ],
+      })
+    }
+    throw new Error(`Unhandled request: ${method} ${url}`)
+  })
+
+  vi.stubGlobal('fetch', fetchMock)
+  return { fetchMock }
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('practice loop', () => {
+  it('moves from catalog through edit and green run to the reference solution', async () => {
+    const { fetchMock } = installPracticeLoopServer()
+    const user = userEvent.setup()
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/',
+          element: <App />,
+          children: [
+            { path: 'challenges', element: <Catalog /> },
+            { path: 'c/:slug', element: <WorkspaceRoute /> },
+            { path: 'c/:slug/solution', element: <SolutionRoute /> },
+          ],
+        },
+      ],
+      { initialEntries: ['/challenges'] },
+    )
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Challenges' })).toBeTruthy()
+    await user.click(screen.getByRole('link', { name: /orders-service/i }))
+
+    const editor = await screen.findByRole('textbox', { name: 'code editor' })
+    expect((editor as HTMLTextAreaElement).value).toBe('def checkout():\n    return "broken"\n')
+
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+    expect(await screen.findByText('1 failed · 1 passed')).toBeTruthy()
+    expect(screen.getByText('◐ ATTEMPTED')).toBeTruthy()
+
+    await user.clear(editor)
+    await user.type(editor, 'def checkout():\n    return "fixed"\n')
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+
+    expect(await screen.findByText('All tests green. Nice.')).toBeTruthy()
+    expect(screen.getByText('● SOLVED')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/challenges/orders-service/files/orders/service.py',
+      expect.objectContaining({ method: 'PUT' }),
+    )
+
+    await user.click(screen.getByRole('link', { name: /compare with the reference solution/i }))
+    expect(await screen.findByRole('heading', { name: 'Reference solution' })).toBeTruthy()
+    expect(await screen.findByText('Atomic checkout')).toBeTruthy()
+    await waitFor(() => expect(screen.getByLabelText('solution diff')).toBeTruthy())
+  })
+})

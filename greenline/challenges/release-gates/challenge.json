@@ -1,0 +1,12 @@
+{
+  "order": 23,
+  "title": "release-gates",
+  "type": "Architecture Extension",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Extend a fixed-default flag store with explainable targeting, emergency disable, and stable percentage cohorts.",
+  "brief": "The deployment service stores environment-specific gate definitions, but evaluation currently returns only the configured default. Add a reusable `evaluation/` package and wire it into `flags/service.py`.\n\nPrecedence is part of the contract: emergency disable, explicit workspace allowlist, ordered rules, stable percentage rollout, then default. Percentage assignment must use a stable digest of both gate key and workspace key; Python's randomized `hash()` and random draws are invalid.\n\n**Your job:** implement pure, deterministic, explainable evaluation without mutating definitions or caller context.",
+  "readonly": ["tests/"],
+  "creatable": ["evaluation/"]
+}

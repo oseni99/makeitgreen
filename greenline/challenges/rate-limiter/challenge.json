@@ -1,0 +1,11 @@
+{
+  "order": 16,
+  "title": "rate-limiter",
+  "type": "Concurrency",
+  "difficulty": "Medium",
+  "minutes": 25,
+  "language": "Python",
+  "blurb": "A per-tenant sliding-window limiter leaks capacity across tenants and admits bursts when callers arrive together.",
+  "brief": "This in-memory sliding-window rate limiter protects a multi-tenant API. Sequential calls mostly work, but production found two contract violations:\n\n1. One noisy tenant consumes another tenant's allowance.\n2. Concurrent requests can all observe spare capacity and enter together, exceeding the configured limit.\n\nThe clock and concurrency gate are injected so the tests are fast and deterministic. The gate is a test probe, not part of the protected state.\n\n**Your job:** fix `limiter/service.py` so each tenant has an independent window and the prune/check/record decision is atomic. Preserve the inclusive expiry rule: an event exactly one full window old no longer counts.",
+  "readonly": ["tests/"]
+}

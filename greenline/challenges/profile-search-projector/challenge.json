@@ -1,0 +1,11 @@
+{
+  "order": 32,
+  "title": "profile-search-projector",
+  "type": "Database Engineering",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "A CDC projector treats allocated IDs as commit order, skips invisible changes, and advances its checkpoint separately from projection writes.",
+  "brief": "A profile service projects an append-only change journal into a search table. A slow transaction owns an earlier change ID while a later ID becomes visible first; the projector advances past the gap and never returns. A crash can also leave projection data ahead of its checkpoint.\n\nInspect the SQLite schema and tests before editing `projector/service.py`.\n\n**Your job:** consume only a visibility-safe prefix and commit the projection and checkpoint atomically.",
+  "readonly": ["tests/"]
+}

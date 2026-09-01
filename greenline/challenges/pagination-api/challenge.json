@@ -1,0 +1,11 @@
+{
+  "order": 10,
+  "title": "pagination-api",
+  "type": "API Contract Debugging",
+  "difficulty": "Medium",
+  "minutes": 25,
+  "language": "Python",
+  "blurb": "A feed's opaque cursor repeats and skips records when new events arrive between page requests.",
+  "brief": "Clients report duplicate feed entries while scrolling during active traffic. The API already returns an opaque `next_cursor`, but its behavior is not stable when rows are inserted between requests.\n\nExplore `pagination/service.py` and read the contract tests. Preserve the public page shape and cursor opacity. A stable order requires `created_at` plus a deterministic tie-breaker.\n\n**Your job:** replace the unstable pagination behavior with opaque keyset pagination so an insertion between page requests cannot shift the remaining traversal.",
+  "readonly": ["tests/"]
+}

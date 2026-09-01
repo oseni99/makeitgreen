@@ -1,0 +1,5 @@
+{"event_id":"evt-100","payload":"{\"device\":\"sensor-a\",\"metric\":\"temperature\",\"value\":21.5}"}
+{"event_id":"evt-poison-7","payload":"{not-json"}
+{"event_id":"evt-101","payload":"{\"device\":\"sensor-b\",\"metric\":\"pressure\",\"value\":100.2}"}
+{"event_id":"evt-102","payload":"{\"device\":\"sensor-a\",\"metric\":\"humidity\",\"value\":44}"}
+{"event_id":"evt-103","payload":"{\"device\":\"sensor-a\",\"metric\":\"temperature\",\"value\":22.0}"}

@@ -1,0 +1,12 @@
+{
+  "order": 1,
+  "title": "orders-service",
+  "type": "Concurrency",
+  "difficulty": "Medium",
+  "minutes": 25,
+  "language": "Python",
+  "blurb": "Concurrent checkouts are overselling inventory. Two tests pass, one goes deeply negative. Find the race, fix it, keep throughput.",
+  "brief": "This order service handles checkouts for a flash-sale platform. Under load, inventory counts go negative — customers are buying stock that doesn't exist.\n\nRun the tests. `test_processes_concurrent_checkouts` expects final inventory of 0, but gets a negative number.\n\n**Your job:** make all tests green without breaking the passing ones. The fix should still allow concurrent checkouts of *different* SKUs to proceed in parallel.",
+  "readonly": ["tests/"],
+  "creatable": ["orders/"]
+}

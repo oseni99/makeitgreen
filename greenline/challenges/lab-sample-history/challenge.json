@@ -1,0 +1,11 @@
+{
+  "order": 39,
+  "title": "lab-sample-history",
+  "type": "Database Engineering",
+  "difficulty": "Hard",
+  "minutes": 40,
+  "language": "Python",
+  "blurb": "Mis-scoped SQL windows merge tenants and aliquots while revised observations masquerade as separate physical events.",
+  "brief": "A multi-tenant laboratory reconstructs sample-status transitions from revised scanner observations at an ingestion cutoff. Reports become impossible when tenants reuse IDs or several aliquots advance together because the query partitions by only part of the business identity.\n\nInspect the schema and tests before editing the SQL in `history/report.py`.\n\n**Your job:** select the latest visible revision, isolate every physical history, collapse consecutive duplicates, and emit deterministic transition metadata.",
+  "readonly": ["tests/"]
+}
