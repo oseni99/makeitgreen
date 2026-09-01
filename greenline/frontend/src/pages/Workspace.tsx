@@ -295,16 +295,24 @@ export default function Workspace() {
 
   const openFile = useCallback(
     async (path: string, signal?: AbortSignal) => {
+      setFileOpError('')
+      let content = contentsRef.current[path]
+      if (content === undefined) {
+        try {
+          content = await api.getFile(slug, path, { signal })
+        } catch (err) {
+          if (!isAbortError(err)) setFileOpError('could not open file')
+          return false
+        }
+        if (signal?.aborted) return false
+        setContents((c) => ({ ...c, [path]: content }))
+      }
       setOpenPath(path)
       setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]))
       setSideTab((tab) => (tab === 'search' ? tab : 'files'))
       // On narrow layouts, opening a file should reveal the editor.
       setMobileSideOpen(false)
-      if (contentsRef.current[path] === undefined) {
-        const content = await api.getFile(slug, path, { signal })
-        if (signal?.aborted) return
-        setContents((c) => ({ ...c, [path]: content }))
-      }
+      return true
     },
     [slug],
   )
@@ -318,7 +326,11 @@ export default function Workspace() {
       const t = loadTimer(slug)
       setTimer(detail.progress.status === 'solved' ? stopTimer(slug, t) : t)
       const first = selectInitialEditableFile(detail.files)
-      if (first) await openFile(first.path, signal)
+      if (first) {
+        const opened = await openFile(first.path, signal)
+        if (signal?.aborted) return
+        if (!opened) throw new Error(`could not open ${first.path}`)
+      }
     },
     [slug, openFile],
   )
@@ -373,7 +385,9 @@ export default function Workspace() {
 
   function jumpTo(path: string, line: number) {
     pendingRevealRef.current = { path, line }
-    openFile(path).then(() => requestAnimationFrame(revealPending))
+    openFile(path).then((opened) => {
+      if (opened) requestAnimationFrame(revealPending)
+    })
   }
 
   useEffect(() => {
@@ -388,8 +402,16 @@ export default function Workspace() {
     if (value === undefined || !openPath) return
     const meta = challenge?.files.find((f) => f.path === openPath)
     if (meta?.readonly) return
-    setContents((c) => ({ ...c, [openPath]: value }))
-    setDirty((d) => new Set(d).add(openPath))
+    setContents((c) => {
+      const next = { ...c, [openPath]: value }
+      contentsRef.current = next
+      return next
+    })
+    setDirty((d) => {
+      const next = new Set(d).add(openPath)
+      dirtyRef.current = next
+      return next
+    })
   }
 
   async function saveAll() {
@@ -406,12 +428,21 @@ export default function Workspace() {
           const meta = challenge?.files.find((f) => f.path === p)
           if (meta?.readonly) next.delete(p)
         }
+        dirtyRef.current = next
         return next
       })
       return
     }
-    await Promise.all(paths.map((p) => api.saveFile(slug, p, contentsRef.current[p])))
-    setDirty(new Set())
+    const pending = paths.map((path) => ({ path, content: contentsRef.current[path] ?? '' }))
+    await Promise.all(pending.map(({ path, content }) => api.saveFile(slug, path, content)))
+    setDirty((d) => {
+      const next = new Set(d)
+      for (const { path, content } of pending) {
+        if (contentsRef.current[path] === content) next.delete(path)
+      }
+      dirtyRef.current = next
+      return next
+    })
     setChallenge((ch) =>
       ch
         ? {
@@ -429,10 +460,13 @@ export default function Workspace() {
     if (!path || !dirtyRef.current.has(path)) return
     const meta = challenge?.files.find((f) => f.path === path)
     if (meta?.readonly) return
-    await api.saveFile(slug, path, contentsRef.current[path] ?? '')
+    const content = contentsRef.current[path] ?? ''
+    await api.saveFile(slug, path, content)
+    const savedCurrentContent = contentsRef.current[path] === content
     setDirty((d) => {
       const next = new Set(d)
-      next.delete(path)
+      if (savedCurrentContent) next.delete(path)
+      dirtyRef.current = next
       return next
     })
     setChallenge((ch) =>
@@ -443,8 +477,10 @@ export default function Workspace() {
           }
         : ch,
     )
-    setSavedFlash(true)
-    window.setTimeout(() => setSavedFlash(false), 1200)
+    if (savedCurrentContent) {
+      setSavedFlash(true)
+      window.setTimeout(() => setSavedFlash(false), 1200)
+    }
   }
   useEffect(() => {
     saveCurrentRef.current = saveCurrent

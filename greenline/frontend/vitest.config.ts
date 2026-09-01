@@ -10,6 +10,7 @@ export default defineConfig({
     },
   },
   test: {
+    css: { include: [/tokens\.css$/] },
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.tsx'],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -49,3 +50,124 @@ def test_pristine_validator_accepts_normal_test_failure(
     monkeypatch.setattr(validate_challenges, "run_pytest", lambda _workdir: next(results))
 
     assert validate_challenges.validate_challenge("demo") is True
+
+
+def test_validator_rejects_solution_that_replaces_tests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo_tests = challenge / "repo" / "tests"
+    solution_tests = challenge / "solution" / "tests"
+    repo_tests.mkdir(parents=True)
+    solution_tests.mkdir(parents=True)
+    (repo_tests / "test_demo.py").write_text("def test_demo(): assert False\n")
+    (solution_tests / "test_demo.py").write_text("def test_demo(): assert True\n")
+
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_validator_rejects_solution_that_adds_nested_conftest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo_specs = challenge / "repo" / "specs"
+    solution_specs = challenge / "solution" / "specs"
+    repo_specs.mkdir(parents=True)
+    solution_specs.mkdir(parents=True)
+    (challenge / "challenge.json").write_text(json.dumps({"readonly": []}))
+    (repo_specs / "test_demo.py").write_text("def test_demo(): assert False\n")
+    (solution_specs / "conftest.py").write_text(
+        "import pytest\n"
+        "def pytest_collection_modifyitems(items):\n"
+        "    for item in items:\n"
+        "        item.add_marker(pytest.mark.skip(reason='hidden by solution'))\n"
+    )
+
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+@pytest.mark.parametrize(
+    "config_name",
+    ["pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"],
+)
+def test_validator_rejects_solution_that_replaces_root_pytest_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_name: str,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(json.dumps({"readonly": []}))
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+    (solution / config_name).write_text("replacement grading configuration\n")
+
+    results = iter([(1, "one failed"), (0, "solution passed")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(validate_challenges, "run_pytest", lambda _workdir: next(results))
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_validator_rejects_solution_under_declared_readonly_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution" / "fixtures"
+    repo.mkdir(parents=True)
+    solution.mkdir(parents=True)
+    (challenge / "challenge.json").write_text(json.dumps({"readonly": ["fixtures/"]}))
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+    (solution / "grading.json").write_text("{}\n")
+
+    results = iter([(1, "one failed"), (0, "solution passed")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(validate_challenges, "run_pytest", lambda _workdir: next(results))
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_validator_rejects_solution_that_replaces_runtime_requirements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps(
+            {
+                "readonly": [],
+                "runtime": {
+                    "kind": "python",
+                    "requirements": "requirements.txt",
+                },
+            }
+        )
+    )
+    (repo / "requirements.txt").write_text("pytest==8.*\n")
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+    (solution / "requirements.txt").write_text("pytest==7.*\n")
+
+    results = iter([(1, "one failed"), (0, "solution passed")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(validate_challenges, "run_suite", lambda _challenge, _workdir: next(results))
+
+    assert validate_challenges.validate_challenge("demo") is False

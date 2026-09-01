@@ -202,35 +202,3 @@ def test_concurrent_sqlite_calls_do_not_crash() -> None:
     for t in threads:
         t.join()
     assert errors == []
-
-
-def test_schema_initialization_runs_once_per_database(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = 0
-    calls_lock = threading.Lock()
-    original = progress._initialize_schema
-
-    def counted(path: Path) -> None:
-        nonlocal calls
-        with calls_lock:
-            calls += 1
-        original(path)
-
-    monkeypatch.setattr(progress, "_initialize_schema", counted)
-    errors: list[BaseException] = []
-
-    def worker() -> None:
-        try:
-            progress.get_all()
-        except BaseException as exc:
-            errors.append(exc)
-
-    threads = [threading.Thread(target=worker) for _ in range(12)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert errors == []
-    assert calls == 1

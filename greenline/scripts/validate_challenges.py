@@ -14,10 +14,21 @@ import tempfile
 from pathlib import Path
 
 IGNORED = {"__pycache__", ".pytest_cache", ".git", ".venv"}
+PYTEST_CONFIG_FILES = {
+    "pytest.ini",
+    ".pytest.ini",
+    "pyproject.toml",
+    "tox.ini",
+    "setup.cfg",
+}
 TIMEOUT_SECONDS = 60
 
 CHALLENGES_DIR = Path(__file__).resolve().parent.parent / "challenges"
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+
+
+class ProtectedSolutionPath(ValueError):
+    """A reference solution attempts to replace protected challenge content."""
 
 
 def discover_slugs() -> list[str]:
@@ -30,11 +41,21 @@ def discover_slugs() -> list[str]:
     )
 
 
-def runtime_config(challenge: Path) -> tuple[list[str], str]:
+def load_metadata(challenge: Path) -> dict[str, object]:
+    metadata_path = challenge / "challenge.json"
+    if not metadata_path.is_file():
+        return {}
     try:
-        meta = json.loads((challenge / "challenge.json").read_text(encoding="utf-8"))
+        meta = json.loads(metadata_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         raise ValueError("invalid challenge metadata") from exc
+    if not isinstance(meta, dict):
+        raise ValueError("challenge metadata must be an object")
+    return meta
+
+
+def runtime_config(challenge: Path) -> tuple[list[str], str]:
+    meta = load_metadata(challenge)
     runtime = meta.get("runtime") or {}
     if not isinstance(runtime, dict):
         raise ValueError("runtime must be an object")
@@ -100,7 +121,7 @@ def run_suite(challenge: Path, workdir: Path) -> tuple[int, str]:
     metadata_path = challenge / "challenge.json"
     if not metadata_path.is_file():
         return run_pytest(workdir)
-    meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+    meta = load_metadata(challenge)
     if not meta.get("runtime"):
         return run_pytest(workdir)
     command, _report = runtime_config(challenge)
@@ -126,7 +147,17 @@ def copy_repo(src: Path, dest: Path) -> None:
     shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*IGNORED))
 
 
-def overlay_solution(repo_copy: Path, solution_dir: Path) -> None:
+def _matches_prefix(rel: str, prefix: str) -> bool:
+    prefix = prefix.rstrip("/")
+    return bool(prefix) and (rel == prefix or rel.startswith(f"{prefix}/"))
+
+
+def overlay_solution(
+    repo_copy: Path,
+    solution_dir: Path,
+    meta: dict[str, object] | None = None,
+) -> None:
+    meta = meta or {}
     if not solution_dir.is_dir():
         return
     for src in solution_dir.rglob("*"):
@@ -137,6 +168,20 @@ def overlay_solution(repo_copy: Path, solution_dir: Path) -> None:
         rel = src.relative_to(solution_dir).as_posix()
         if rel == "SOLUTION.md":
             continue
+        path = Path(rel)
+        if path.name == "conftest.py" or (
+            len(path.parts) == 1 and rel in PYTEST_CONFIG_FILES
+        ):
+            raise ProtectedSolutionPath(rel)
+        runtime = meta.get("runtime")
+        if isinstance(runtime, dict) and rel == runtime.get("requirements"):
+            raise ProtectedSolutionPath(rel)
+        readonly = meta.get("readonly", ["tests/"])
+        if isinstance(readonly, list) and any(
+            isinstance(prefix, str) and _matches_prefix(rel, prefix)
+            for prefix in readonly
+        ):
+            raise ProtectedSolutionPath(rel)
         dest = repo_copy / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
@@ -180,7 +225,12 @@ def validate_challenge(slug: str) -> bool:
 
         overlaid = tmpdir / "solution"
         copy_repo(repo, overlaid)
-        overlay_solution(overlaid, solution)
+        try:
+            meta = load_metadata(challenge)
+            overlay_solution(overlaid, solution, meta)
+        except ProtectedSolutionPath as exc:
+            print(_fail(f"   solution : protected path {exc}"))
+            return False
         exit_code, output = run_suite(challenge, overlaid)
         if exit_code == 0:
             print(_ok("   solution : exit 0  (expected pass)"))

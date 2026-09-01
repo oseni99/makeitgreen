@@ -1,6 +1,7 @@
 import os
 import signal
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,43 @@ def test_output_truncated_to_last_20000_chars(
         "END_UNIQUE_MARKER_GL" in result["output"]
     )
     assert "START_UNIQUE_MARKER_GL" not in result["output"]
+
+
+def test_loud_run_retains_only_a_bounded_tail_while_streaming_all_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tiny_repo(
+        tmp_path,
+        monkeypatch,
+        "def test_loud():\n"
+        "    print('START_UNIQUE_MARKER_GL')\n"
+        "    for _ in range(8000):\n"
+        "        print('P' * 1000)\n"
+        "    print('END_UNIQUE_MARKER_GL')\n"
+        "    assert False\n",
+    )
+    streamed_characters = 0
+    streamed_end_marker = False
+
+    def observe(chunk: str) -> None:
+        nonlocal streamed_characters, streamed_end_marker
+        streamed_characters += len(chunk)
+        streamed_end_marker = streamed_end_marker or "END_UNIQUE_MARKER_GL" in chunk
+
+    tracemalloc.start()
+    try:
+        result = runner.run_tests("bounded-tail", observe)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert streamed_characters > 8_000_000
+    assert streamed_end_marker is True
+    assert len(result["output"]) <= runner.OUTPUT_LIMIT
+    assert "END_UNIQUE_MARKER_GL" in result["output"]
+    assert "START_UNIQUE_MARKER_GL" not in result["output"]
+    assert result["output_truncated"] is True
+    assert peak_bytes < 4_000_000
 
 
 @pytest.mark.parametrize(

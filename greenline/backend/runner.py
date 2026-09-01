@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from threading import Thread
 import time
 from pathlib import Path
@@ -31,6 +32,42 @@ MESSAGE_LIMIT = 4000
 
 # Cap pytest stdout/stderr forwarded to the client (tail kept).
 OUTPUT_LIMIT = 20_000
+
+
+class _OutputTail:
+    """Retain at most ``limit`` characters while accepting a full stream."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._chunks: deque[str] = deque()
+        self._length = 0
+        self.truncated = False
+
+    def append(self, chunk: str) -> None:
+        if not chunk:
+            return
+        if self._limit <= 0:
+            self.truncated = True
+            return
+
+        self._chunks.append(chunk)
+        self._length += len(chunk)
+        overflow = self._length - self._limit
+        if overflow <= 0:
+            return
+
+        self.truncated = True
+        while self._chunks and overflow >= len(self._chunks[0]):
+            removed = self._chunks.popleft()
+            removed_length = len(removed)
+            self._length -= removed_length
+            overflow -= removed_length
+        if overflow:
+            self._chunks[0] = self._chunks[0][overflow:]
+            self._length -= overflow
+
+    def text(self) -> str:
+        return "".join(self._chunks)
 
 
 def _parse_counts(output: str) -> dict[str, int]:
@@ -220,12 +257,12 @@ def run_tests(slug: str, on_output: Callable[[str], None] | None = None) -> dict
             bufsize=1,
             **popen_kwargs,
         )
-        chunks: list[str] = []
+        output_tail = _OutputTail(OUTPUT_LIMIT)
 
         def read_output() -> None:
             assert proc.stdout is not None
             for chunk in proc.stdout:
-                chunks.append(chunk)
+                output_tail.append(chunk)
                 if on_output is not None:
                     on_output(chunk)
 
@@ -238,9 +275,12 @@ def run_tests(slug: str, on_output: Callable[[str], None] | None = None) -> dict
             _terminate_timed_out_process(proc)
             exit_code = -1
         reader.join(timeout=TERMINATION_GRACE_SECONDS)
-        output = "".join(chunks)
         if exit_code == -1:
-            output += f"\n\nTIMEOUT: test run exceeded {TIMEOUT_SECONDS}s (possible deadlock or infinite loop)"
+            output_tail.append(
+                f"\n\nTIMEOUT: test run exceeded {TIMEOUT_SECONDS}s "
+                "(possible deadlock or infinite loop)"
+            )
+        output = output_tail.text()
 
         tests: list[dict[str, Any]] = []
         counts = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
@@ -255,12 +295,11 @@ def run_tests(slug: str, on_output: Callable[[str], None] | None = None) -> dict
             # Timeout or a crash before the plugin could write its report.
             counts = {**_parse_counts(output), "skipped": 0}
 
-    truncated = len(output) > OUTPUT_LIMIT
     return {
         "exit_code": exit_code,
         "green": exit_code == 0,
-        "output": output[-OUTPUT_LIMIT:],
-        "output_truncated": truncated,
+        "output": output,
+        "output_truncated": output_tail.truncated,
         "tests": tests,
         **counts,
     }
