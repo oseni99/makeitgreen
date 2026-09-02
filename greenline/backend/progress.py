@@ -10,6 +10,7 @@ on the client). It never changes status, attempts, or solved_at.
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -104,8 +105,15 @@ def _initialize_schema(path: Path) -> None:
         conn.close()
 
 
-def _ensure_schema() -> Path:
-    path = DB_PATH.resolve()
+def _db_path(user_id: str | None = None) -> Path:
+    if user_id is None:
+        return DB_PATH.resolve()
+    namespace = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
+    return (DB_PATH.parent / "users" / namespace / DB_PATH.name).resolve()
+
+
+def _ensure_schema(user_id: str | None = None) -> Path:
+    path = _db_path(user_id)
     if path in _INITIALIZED_DATABASES and path.exists() and _has_expected_schema(path):
         return path
     with _SCHEMA_LOCK:
@@ -120,9 +128,9 @@ def _ensure_schema() -> Path:
 
 
 @contextmanager
-def _conn() -> Iterator[sqlite3.Connection]:
+def _conn(user_id: str | None = None) -> Iterator[sqlite3.Connection]:
     """Open one short-lived data connection after serialized schema setup."""
-    path = _ensure_schema()
+    path = _ensure_schema(user_id)
     conn = sqlite3.connect(path, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
@@ -147,8 +155,8 @@ def _progress_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def get_all() -> dict[str, dict]:
-    with _conn() as conn:
+def get_all(user_id: str | None = None) -> dict[str, dict]:
+    with _conn(user_id) as conn:
         rows = conn.execute(
             "SELECT slug, status, attempts, solved_at, spoiled FROM progress"
         ).fetchall()
@@ -170,6 +178,7 @@ def record_run(
     tests: list[dict[str, Any]] | None = None,
     started_at: str | None = None,
     output_truncated: bool = False,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Increment attempts (always), update solved status, append a history row."""
     now = datetime.now(timezone.utc).isoformat()
@@ -178,7 +187,7 @@ def record_run(
     history_output_truncated = output_truncated or len(output) > OUTPUT_TAIL_LIMIT
     tests_json = json.dumps(tests or [])
 
-    with _conn() as conn:
+    with _conn(user_id) as conn:
         conn.execute(
             "INSERT INTO progress (slug, status, attempts) VALUES (?, 'attempted', 0) "
             "ON CONFLICT(slug) DO NOTHING",
@@ -239,9 +248,9 @@ def record_run(
     }
 
 
-def list_runs(slug: str, limit: int = 50) -> list[dict[str, Any]]:
+def list_runs(slug: str, limit: int = 50, user_id: str | None = None) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
-    with _conn() as conn:
+    with _conn(user_id) as conn:
         rows = conn.execute(
             """SELECT id, slug, started_at, duration_ms, session_elapsed_ms, green,
                       passed, failed, errors, skipped, exit_code, output_tail,
@@ -276,9 +285,9 @@ def list_runs(slug: str, limit: int = 50) -> list[dict[str, Any]]:
     return out
 
 
-def mark_spoiled(slug: str) -> dict[str, Any]:
+def mark_spoiled(slug: str, user_id: str | None = None) -> dict[str, Any]:
     """Set spoiled=1 without changing status, attempts, or solved_at."""
-    with _conn() as conn:
+    with _conn(user_id) as conn:
         conn.execute(
             "INSERT INTO progress (slug, status, attempts) VALUES (?, 'todo', 0) "
             "ON CONFLICT(slug) DO NOTHING",
@@ -293,7 +302,7 @@ def mark_spoiled(slug: str) -> dict[str, Any]:
     return _progress_from_row(row)
 
 
-def reset(slug: str) -> None:
-    with _conn() as conn:
+def reset(slug: str, user_id: str | None = None) -> None:
+    with _conn(user_id) as conn:
         conn.execute("DELETE FROM runs WHERE slug = ?", (slug,))
         conn.execute("DELETE FROM progress WHERE slug = ?", (slug,))

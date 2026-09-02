@@ -217,9 +217,13 @@ def _runtime(slug: str, src: Path, tmpdir: Path, report_path: Path) -> tuple[lis
     return [substitutions.get(part, part) for part in command], runtime.get("report", default_report)
 
 
-def run_tests(slug: str, on_output: Callable[[str], None] | None = None) -> dict[str, Any]:
+def run_tests(
+    slug: str,
+    on_output: Callable[[str], None] | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     src = repo_dir(slug)
-    ws = workspace_dir(slug)
+    ws = workspace_dir(slug) if user_id is None else workspace_dir(slug, user_id)
 
     with (
         tempfile.TemporaryDirectory(prefix=f"greenline-{slug}-") as tmp,
@@ -235,7 +239,11 @@ def run_tests(slug: str, on_output: Callable[[str], None] | None = None) -> dict
         )
         # Overlay user edits only after revalidating persisted workspace data.
         persisted = any(path.is_file() for path in ws.rglob("*"))
-        overlays = challenges.workspace_overlays(slug) if persisted else []
+        overlays = (
+            challenges.workspace_overlays(slug)
+            if user_id is None
+            else challenges.workspace_overlays(slug, user_id)
+        ) if persisted else []
         for edited, rel in overlays:
             dest = tmpdir / rel
             dest.parent.mkdir(parents=True, exist_ok=True)

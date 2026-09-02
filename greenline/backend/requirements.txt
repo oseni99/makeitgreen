@@ -3,3 +3,4 @@ uvicorn==0.32.*
 pytest==8.*
 pytest-json-report==1.*
 httpx==0.28.*
+clerk-backend-api==3.*

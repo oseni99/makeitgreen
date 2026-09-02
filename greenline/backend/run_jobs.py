@@ -42,12 +42,14 @@ class RunJobStore:
         slug: str,
         work: Callable[[Callable[[str], None]], dict[str, Any]],
         *,
+        user_id: str | None = None,
         release: Callable[[], None],
     ) -> dict[str, Any]:
         job_id = uuid4().hex
         job = {
             "id": job_id,
             "slug": slug,
+            "user_id": user_id,
             "status": "queued",
             "output": "",
             "output_base": 0,
@@ -96,10 +98,18 @@ class RunJobStore:
             raise
         return {"job_id": job_id, "slug": slug, "status": "queued"}
 
-    def get(self, job_id: str, *, after: int = 0) -> dict[str, Any] | None:
+    def get(
+        self,
+        job_id: str,
+        *,
+        after: int = 0,
+        user_id: str | None = None,
+    ) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
+                return None
+            if job.get("user_id") != user_id:
                 return None
             output = job["output"]
             base = job["output_base"]

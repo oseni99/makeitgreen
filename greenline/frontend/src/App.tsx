@@ -1,8 +1,27 @@
 import { Menu, X } from 'lucide-react'
+import { SignInButton, UserButton, useAuth } from '@clerk/react'
 import { useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { buttonVariants } from '@/components/ui/button-variants'
 import { Button } from '@/components/ui/button'
+
+function AccountActions() {
+  if (!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) return null
+  return <ConfiguredAccountActions />
+}
+
+function ConfiguredAccountActions() {
+  const { isLoaded, isSignedIn } = useAuth()
+  if (!isLoaded) return null
+  if (!isSignedIn) {
+    return (
+      <SignInButton mode="redirect" forceRedirectUrl="/challenges">
+        <Button type="button" variant="utility" size="sm">Sign in with Google</Button>
+      </SignInButton>
+    )
+  }
+  return <UserButton />
+}
 
 function MobileNavigation() {
   const [open, setOpen] = useState(false)
@@ -68,6 +87,7 @@ export default function App() {
             Challenges
           </Link>
           <div className="hidden flex-1 md:block" />
+          <AccountActions />
           <Link
             to="/challenges"
             className={`${buttonVariants({ variant: 'utility' })} hidden md:inline-flex`}

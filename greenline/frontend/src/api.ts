@@ -121,7 +121,10 @@ export class ApiError extends Error {
 }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init)
+  const token = await getAuthToken()
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const r = await fetch(url, { ...init, headers })
   if (!r.ok) throw new ApiError(init?.method ?? 'GET', url, r.status)
   return r.json()
 }
@@ -200,3 +203,4 @@ export const api = {
   getSolution: (slug: string, opts?: FetchOpts) =>
     req<Solution>(`/api/challenges/${slug}/solution`, { signal: opts?.signal }),
 }
+import { getAuthToken } from './authToken.ts'

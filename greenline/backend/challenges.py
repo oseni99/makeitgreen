@@ -8,6 +8,7 @@ A challenge lives in challenges/<slug>/ with this layout:
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 from pathlib import Path
 from typing import Any
@@ -157,15 +158,23 @@ def solution_dir(slug: str) -> Path:
     return CHALLENGES_DIR / slug / "solution"
 
 
-def workspace_dir(slug: str) -> Path:
-    d, _ = _safe_relpath(WORKSPACES_DIR, slug)
-    if d == WORKSPACES_DIR.resolve():
+def _workspace_root(user_id: str | None = None) -> Path:
+    if user_id is None:
+        return WORKSPACES_DIR
+    namespace = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
+    return WORKSPACES_DIR / "users" / namespace
+
+
+def workspace_dir(slug: str, user_id: str | None = None) -> Path:
+    root = _workspace_root(user_id)
+    d, _ = _safe_relpath(root, slug)
+    if d == root.resolve():
         raise InvalidPath(slug)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def workspace_overlays(slug: str) -> list[tuple[Path, str]]:
+def workspace_overlays(slug: str, user_id: str | None = None) -> list[tuple[Path, str]]:
     """Return persisted edits only after reapplying the challenge policy.
 
     Workspace data survives backend restarts and can also be modified outside
@@ -174,7 +183,7 @@ def workspace_overlays(slug: str) -> list[tuple[Path, str]]:
     """
     meta = load(slug)
     root = repo_dir(slug)
-    ws = workspace_dir(slug)
+    ws = workspace_dir(slug, user_id)
     overlays: list[tuple[Path, str]] = []
     runtime = meta.get("runtime") or {}
     requirements_path = runtime.get("requirements")
@@ -236,11 +245,11 @@ def is_creatable(meta: dict[str, Any], rel: str) -> bool:
     return False
 
 
-def file_tree(slug: str) -> list[dict[str, Any]]:
+def file_tree(slug: str, user_id: str | None = None) -> list[dict[str, Any]]:
     """Flat list of repo + workspace-only files with edited/readonly/new flags."""
     meta = load(slug)
     root = repo_dir(slug)
-    ws = workspace_dir(slug)
+    ws = workspace_dir(slug, user_id)
     files: list[dict[str, Any]] = []
     seen: set[str] = set()
     for p in sorted(root.rglob("*")):
@@ -279,10 +288,10 @@ def file_tree(slug: str) -> list[dict[str, Any]]:
     return files
 
 
-def read_file(slug: str, rel: str) -> str:
+def read_file(slug: str, rel: str, user_id: str | None = None) -> str:
     """Return workspace copy if user has edited the file, else the original."""
     repo_file, canonical_rel = _safe_relpath(repo_dir(slug), rel)
-    ws_file, _ = _safe_relpath(workspace_dir(slug), canonical_rel)
+    ws_file, _ = _safe_relpath(workspace_dir(slug, user_id), canonical_rel)
     if ws_file.is_file():
         return _read_text_file(ws_file)
     if not repo_file.is_file():
@@ -290,14 +299,14 @@ def read_file(slug: str, rel: str) -> str:
     return _read_text_file(repo_file)
 
 
-def write_file(slug: str, rel: str, content: str) -> None:
+def write_file(slug: str, rel: str, content: str, user_id: str | None = None) -> None:
     meta = load(slug)
     # Canonicalize the request path once, then use the same repo-relative path
     # for policy checks and the workspace destination.
     repo_file, canonical_rel = _safe_relpath(repo_dir(slug), rel)
     if is_readonly(meta, canonical_rel):
         raise PermissionError(rel)
-    ws_file, _ = _safe_relpath(workspace_dir(slug), canonical_rel)
+    ws_file, _ = _safe_relpath(workspace_dir(slug, user_id), canonical_rel)
     # Existing repo files, or files the user created under a creatable prefix.
     if not repo_file.is_file() and not ws_file.is_file():
         raise ChallengeNotFound(rel)
@@ -305,7 +314,7 @@ def write_file(slug: str, rel: str, content: str) -> None:
     ws_file.write_text(content)
 
 
-def create_file(slug: str, rel: str, content: str = "") -> None:
+def create_file(slug: str, rel: str, content: str = "", user_id: str | None = None) -> None:
     """Create a workspace-only file under a challenge.json creatable prefix."""
     meta = load(slug)
     if not rel or rel.endswith("/"):
@@ -317,26 +326,26 @@ def create_file(slug: str, rel: str, content: str = "") -> None:
         raise PermissionError(rel)
     if repo_file.exists():
         raise FileExistsError(rel)
-    ws_file, _ = _safe_relpath(workspace_dir(slug), canonical_rel)
+    ws_file, _ = _safe_relpath(workspace_dir(slug, user_id), canonical_rel)
     if ws_file.exists():
         raise FileExistsError(rel)
     ws_file.parent.mkdir(parents=True, exist_ok=True)
     ws_file.write_text(content)
 
 
-def delete_file(slug: str, rel: str) -> None:
+def delete_file(slug: str, rel: str, user_id: str | None = None) -> None:
     """Remove a workspace-only user-created file. Original repo files are refused."""
     load(slug)
     repo_file, canonical_rel = _safe_relpath(repo_dir(slug), rel)
     if repo_file.exists():
         raise PermissionError(rel)
-    ws_file, _ = _safe_relpath(workspace_dir(slug), canonical_rel)
+    ws_file, _ = _safe_relpath(workspace_dir(slug, user_id), canonical_rel)
     if not ws_file.is_file():
         raise ChallengeNotFound(rel)
     ws_file.unlink()
 
 
-def search_files(slug: str, query: str, *, limit: int = 100) -> list[dict[str, Any]]:
+def search_files(slug: str, query: str, *, limit: int = 100, user_id: str | None = None) -> list[dict[str, Any]]:
     """Case-insensitive substring search across challenge files (workspace overlays win)."""
     q = query.strip()
     if not q:
@@ -346,10 +355,10 @@ def search_files(slug: str, query: str, *, limit: int = 100) -> list[dict[str, A
     limit = max(1, min(int(limit), 200))
     needle = q.lower()
     hits: list[dict[str, Any]] = []
-    for entry in file_tree(slug):
+    for entry in file_tree(slug, user_id):
         path = entry["path"]
         try:
-            text = read_file(slug, path)
+            text = read_file(slug, path, user_id)
         except (ChallengeNotFound, InvalidPath):
             continue
         for i, line in enumerate(text.splitlines(), start=1):
@@ -366,11 +375,12 @@ def search_files(slug: str, query: str, *, limit: int = 100) -> list[dict[str, A
     return hits
 
 
-def reset_workspace(slug: str) -> None:
+def reset_workspace(slug: str, user_id: str | None = None) -> None:
     import shutil
 
-    ws, _ = _safe_relpath(WORKSPACES_DIR, slug)
-    if ws == WORKSPACES_DIR.resolve():
+    root = _workspace_root(user_id)
+    ws, _ = _safe_relpath(root, slug)
+    if ws == root.resolve():
         raise InvalidPath(slug)
     load(slug)
     if ws.is_dir():
