@@ -1,0 +1,11 @@
+{
+  "order": 46,
+  "title": "token-auth-api",
+  "type": "API Contract Debugging",
+  "difficulty": "Easy",
+  "minutes": 20,
+  "language": "Python",
+  "blurb": "A token authorizer is accepting lookalike credentials and unrelated scopes. Restore exact authentication and capability checks.",
+  "brief": "This service authorizes internal API calls with opaque bearer tokens. A recent incident showed that a token copied from a longer credential was accepted, and callers could pass a scope that merely appeared inside another scope name.\n\nRead the tests as the contract. Tokens and scopes must match exactly, and a failed authorization must raise the documented error.\n\n**Your job:** make every test green without weakening the existing passing behavior.",
+  "readonly": ["tests/"]
+}

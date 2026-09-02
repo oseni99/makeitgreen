@@ -12,7 +12,7 @@ Three researched, original candidate-question batches are specified in
 
 ---
 
-## Current catalog (45 challenges)
+## Current catalog (49 challenges)
 
 | Order | Slug | Type | Difficulty | Minutes | Core skill |
 |------:|------|------|------------|--------:|------------|
@@ -61,8 +61,21 @@ Three researched, original candidate-question batches are specified in
 | 43 | `feature-flag-ext` | Architecture Extension | Medium | 30 | Environment-scoped last-known-good flag snapshots |
 | 44 | `gc-churn` | Runtime Diagnostics | Medium | 30 | Bounded top-K selection before expensive rendering |
 | 45 | `cdc-slot` | Database Engineering | Hard | 40 | Slowest-slot retention and acknowledgement fencing |
+| 46 | `token-auth-api` | API Contract Debugging | Easy | 20 | Exact bearer-token and capability matching |
+| 47 | `config-merge` | Repository Implementation | Easy | 20 | Preserve explicit false, zero, and empty overrides |
+| 48 | `job-lease` | Concurrency | Medium | 30 | Expiry and generation fencing for worker leases |
+| 49 | `queue-drain` | Incident Debugging | Medium | 30 | Quarantine poison events without stranding healthy work |
 
-**Status:** all 45 pass `scripts/validate_challenges.py` (pristine `repo/` fails; `repo/` + `solution/` passes).
+**Status:** all 49 pass `scripts/validate_challenges.py` (pristine `repo/` fails; `repo/` + `solution/` passes).
+
+## Fourth authoring batch (orders 46–49) — COMPLETE
+
+| Order | Slug | Type | Difficulty | Primary invariant |
+|---:|---|---|---|---|
+| 46 | `token-auth-api` | API Contract Debugging | Easy | Exact credentials and capability boundaries — ✅ live |
+| 47 | `config-merge` | Repository Implementation | Easy | Presence beats truthiness for explicit overrides — ✅ live |
+| 48 | `job-lease` | Concurrency | Medium | Lease generations fence stale workers — ✅ live |
+| 49 | `queue-drain` | Incident Debugging | Medium | Poison messages do not stop healthy work — ✅ live |
 
 Curated learning paths and a difficulty ladder live in [`PREP_TRACKS.md`](PREP_TRACKS.md).
 The publishing gates and weekly rotation live in [`CONTENT_CADENCE.md`](CONTENT_CADENCE.md).
@@ -253,9 +266,21 @@ Mirror CoderPad "applied data processing" rounds; frame as fix/extend a broken c
 | `gc-churn` | Runtime Diagnostics | Unbounded response rendering drives allocation churn | ✅ |
 | `cdc-slot` | Database Engineering | Multi-consumer CDC retention and acknowledgement | ✅ |
 
-**Still optional for future parity:** another language beyond Python/JavaScript and
-system-design diagram exercises. Difficulty tracks, weekly cadence, prep guides, and
-JavaScript runtime support are already live.
+**Still optional for future parity:** another language beyond Python/JavaScript.
+System-design diagram exercises are intentionally out of scope. Difficulty tracks,
+weekly cadence, prep guides, and JavaScript runtime support are already live.
+
+## Later product ideas
+
+The curated prep tracks are intentionally kept out of the main catalog for now. If
+they become product UI later, use a lightweight secondary surface rather than adding
+a large chooser to the challenge list.
+
+Later TODOs:
+
+- A secondary prep-track view with descriptions, progress, and a recommended next challenge.
+- Retention practice: retry queue, weekly review prompts, and repeated-mistake signals.
+- Publishing operations: a visible weekly release workflow and cadence tracking.
 
 ---
 

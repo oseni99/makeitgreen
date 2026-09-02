@@ -1,0 +1,11 @@
+{
+  "order": 49,
+  "title": "queue-drain",
+  "type": "Incident Debugging",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "One malformed event is stopping the entire drain loop. Quarantine poison messages while healthy work keeps flowing.",
+  "brief": "During an import incident, one malformed event caused the queue consumer to stop. Healthy events behind it remained unprocessed and the backlog grew.\n\nStart with the incident evidence in the tests. The drain should classify a bad event, record it in quarantine, and continue processing later events. Unexpected processor failures should still stop the drain so they are not silently lost.\n\n**Your job:** repair the loop and preserve the ordering of successfully processed events.",
+  "readonly": ["tests/"]
+}

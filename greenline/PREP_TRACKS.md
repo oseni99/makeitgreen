@@ -9,13 +9,15 @@ For engineers new to repository interviews. Target: 6–8 sessions.
 
 1. `wallet-service` — read tests as the specification.
 2. `return-workflow` — preserve state-machine invariants.
-3. `log-aggregator` — reason about boundaries and data reduction.
-4. `ledger-api` — implement status and idempotency contracts.
-5. `cache-ext` — extend a working service through a narrow interface.
-6. `runbook-revisions` — combine lifecycle policy with optimistic updates.
-7. `notification-dispatch-node` — extend a FIFO contract in Node.js.
-8. `auth-tenant-leak` — keep direct lookups and caches inside the tenant boundary.
-9. `feature-flag-ext` — add a last-known-good runtime client around a working source.
+3. `config-merge` — distinguish explicit overrides from missing values.
+4. `log-aggregator` — reason about boundaries and data reduction.
+5. `ledger-api` — implement status and idempotency contracts.
+6. `token-auth-api` — keep credentials and capabilities exact.
+7. `cache-ext` — extend a working service through a narrow interface.
+8. `runbook-revisions` — combine lifecycle policy with optimistic updates.
+9. `notification-dispatch-node` — extend a FIFO contract in Node.js.
+10. `auth-tenant-leak` — keep direct lookups and caches inside the tenant boundary.
+11. `feature-flag-ext` — add a last-known-good runtime client around a working source.
 
 ## Concurrency and distributed correctness
 
@@ -25,19 +27,21 @@ For backend interviews where retries, races, and consistency matter. Target:
 1. `orders-service` — recognize check-then-act races.
 2. `transfer-deadlock` — establish a global lock order.
 3. `rate-limiter` — make admission atomic and tenant-scoped.
-4. `invoice-delivery-worker` — combine idempotency, acknowledgement, and backoff.
-5. `workspace-replica-router` — preserve read-your-writes across replicas.
-6. `invoice-cents-migration` — perform online dual-write migration safely.
-7. `digest-scheduler` — use leases and fencing generations for singleton work.
-8. `device-command-webhook` — layer idempotency over per-device ordering.
+4. `job-lease` — fence stale workers after lease expiry.
+5. `invoice-delivery-worker` — combine idempotency, acknowledgement, and backoff.
+6. `workspace-replica-router` — preserve read-your-writes across replicas.
+7. `invoice-cents-migration` — perform online dual-write migration safely.
+8. `digest-scheduler` — use leases and fencing generations for singleton work.
+9. `device-command-webhook` — layer idempotency over per-device ordering.
 
 ## Production debugging
 
 For incident, database, and runtime rounds. Target: 8–10 sessions.
 
 1. `incident-alerts` — trace symptoms through logs and time windows.
-2. `deploy-crash` — diagnose a startup failure from evidence.
-3. `device-ingest-incident` — isolate poison data without stopping the stream.
+2. `queue-drain` — quarantine poison data without stopping the stream.
+3. `deploy-crash` — diagnose a startup failure from evidence.
+4. `device-ingest-incident` — isolate poison data without stopping the stream.
 4. `audit-export-pool` — clean up transactions and pooled resources.
 5. `thread-stall` — read thread evidence and remove pool starvation.
 6. `build-stream-leak` — follow a retaining path and repair lifecycle cleanup.

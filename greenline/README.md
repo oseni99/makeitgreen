@@ -43,6 +43,7 @@ Going green marks the challenge solved.
 # backend (port 8000)
 cd backend
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+set -a; source .env.local; set +a
 ./venv/bin/uvicorn app:app --port 8000
 
 # frontend (port 5173, proxies /api to 8000)
@@ -52,6 +53,9 @@ npm run dev
 ```
 
 Open http://localhost:5173.
+
+Authentication setup is documented in [AUTH.md](AUTH.md). The production
+configuration uses Clerk with Google as the sole sign-in provider.
 
 ## Seed challenges
 
@@ -102,6 +106,10 @@ Open http://localhost:5173.
 | `feature-flag-ext` | Architecture Extension | Add environment-scoped last-known-good snapshots with deterministic refresh |
 | `gc-churn` | Runtime Diagnostics | Every historical event is rendered before a bounded activity feed is sliced |
 | `cdc-slot` | Database Engineering | Fast-consumer progress compacts changes still required by slower CDC slots |
+| `token-auth-api` | API Contract Debugging | Exact bearer-token and capability matching |
+| `config-merge` | Repository Implementation | Preserve explicit false, zero, and empty overrides |
+| `job-lease` | Concurrency | Expiry and generation fencing for worker leases |
+| `queue-drain` | Incident Debugging | Quarantine poison events without stranding healthy work |
 
 ## Adding a challenge
 
@@ -145,4 +153,5 @@ gap with file references and suggested implementations. Start there before addin
   separate in `backend/requirements.txt`.
 - The "sandbox" is a temp dir + timeout — fine for your own machine, not for
   hosting untrusted users. Containerize the runner before ever deploying.
-- No accounts; progress is a local SQLite file.
+- Clerk Google sign-in is supported when configured; local development without Clerk
+  remains available. Authenticated workspace and progress state is isolated per Clerk user.

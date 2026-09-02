@@ -1,0 +1,11 @@
+{
+  "order": 48,
+  "title": "job-lease",
+  "type": "Concurrency",
+  "difficulty": "Medium",
+  "minutes": 30,
+  "language": "Python",
+  "blurb": "A worker can keep renewing a lease after another worker has taken over. Restore expiry and generation fencing.",
+  "brief": "Two workers coordinate ownership of a scheduled job through a short lease. When a worker pauses past expiry, another worker may acquire the job. The old worker must not be able to renew or complete the newer owner's lease.\n\nUse the injected clock and read the tests as the contract. Lease ownership is identified by both owner and generation.\n\n**Your job:** make the lease store reject stale owners while preserving valid acquire, renew, and release behavior.",
+  "readonly": ["tests/"]
+}

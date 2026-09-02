@@ -27,7 +27,7 @@ SQLite progress. Backend runs on :8000, frontend dev server on :5173 with `/api`
 
 **Verified:** the full loop works end-to-end (catalog → workspace → red run → edit →
 green run → solved state → solution page). A jsdom React integration test now drives
-that behavioral practice loop through the real route tree and mocked HTTP boundary. All 45 challenges
+that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
 validate both ways (broken repo fails, solution overlay passes) via
 `scripts/validate_challenges.py`.
 The backend currently has 102 passing platform tests covering file-policy boundaries
@@ -43,7 +43,8 @@ covering the practice loop and editor failure navigation. CI is
 
 | Priority | Work | Why now |
 |---|---|---|
-| Optional | Research a third content batch or operate the weekly cadence | Both existing 10-question research batches are fully live |
+| Later | Secondary prep-track view and recommended next challenge | Keep curriculum guidance out of the main challenge list for now |
+| Later | Retention practice and weekly publishing workflow | Valuable after the guided track experience is in place |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
 | Later | Production sandbox, identity, tenancy, and deployment | Explicitly deferred for local development, but mandatory before public hosting |
 
@@ -174,11 +175,14 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   tests/config are read-only. Host isolation protects infrastructure; trustworthy
   scoring may additionally require a trusted supervisor and a protocol that does not
   accept the candidate process's exit status as the sole source of truth.
-- **Current API/state:** there is no authentication or authorization. Workspaces are
-  keyed only by challenge slug, and `progress.db` is global, so multiple users would
-  edit the same files and share progress. CORS is a browser policy, not an access-control
-  boundary; non-browser clients can call the code-execution endpoint directly. There is
-  also no request-size limit, run quota, rate limit, or concurrency cap across slugs.
+- **Current API/state:** Clerk bearer-token verification is now available and enforced
+  whenever `CLERK_SECRET_KEY` is configured; the frontend exposes Google-only sign-in
+  when `VITE_CLERK_PUBLISHABLE_KEY` is configured. Authenticated workspaces, progress,
+  run history, and run-job polling are isolated by Clerk's verified `sub`. CORS is a
+  browser policy, not an access-control boundary;
+  non-browser clients can call the code-execution endpoint directly when auth is not
+  configured. There is also no request-size limit, run quota, rate limit, or concurrency
+  cap across slugs.
   `challenge_locks.py` is intentionally in-process; multiple API processes or replicas
   would not share its locks, so hosted concurrency needs storage-backed coordination or
   transactional job ownership.
@@ -187,12 +191,11 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   default, a read-only root filesystem, a dedicated writable work mount, and enforced
   CPU, memory, PID, output-size, and wall-clock limits. Hosted mode must not silently
   fall back to the host subprocess runner.
-- **Application gate:** add authenticated users, user-scoped workspace/progress/run
-  records, authorization on every challenge operation, per-user and global run limits,
-  request/body limits, audit records, and production-safe secret/config handling.
+- **Application gate:** add per-user and global run limits, request/body limits, audit
+  records, and production-safe secret/config handling. Threat-model this flow before
+  deployment work in gap 15.
 - **Suggested sequence:** define the runner interface first, implement a container-backed
-  runner behind it, then introduce user identity and move filesystem/SQLite state behind
-  user-scoped repositories. Threat-model this flow before deployment work in gap 15.
+  runner behind it, then harden the existing user-scoped repositories for hosted storage.
 
 ### 8. ~~Runs are synchronous and non-streaming~~ — CLOSED
 

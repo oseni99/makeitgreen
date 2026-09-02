@@ -1,0 +1,11 @@
+{
+  "order": 47,
+  "title": "config-merge",
+  "type": "Repository Implementation",
+  "difficulty": "Easy",
+  "minutes": 20,
+  "language": "Python",
+  "blurb": "A deployment config merger drops explicit false and zero overrides. Preserve every value supplied by the environment.",
+  "brief": "This service combines safe defaults with environment-specific overrides before boot. Operators noticed that disabling a feature or setting a numeric limit to zero had no effect.\n\nThe tests describe the merge contract: nested mappings merge recursively, while every explicitly supplied scalar—including `false`, `0`, and an empty string—must replace the default.\n\n**Your job:** fix the merger without mutating either input mapping.",
+  "readonly": ["tests/"]
+}

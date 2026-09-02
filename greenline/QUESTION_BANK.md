@@ -6,7 +6,7 @@ External problem collections are research inputs only: do not copy their prose,
 fixtures, repositories, tests, solutions, names, or domain stories.
 
 **Status:** all three research batches are fully implemented.
-**Catalog baseline:** 45 live challenges; all Q1–Q26 specifications are live.
+**Catalog baseline:** 49 live challenges; all Q1–Q26 specifications are live. The fourth batch adds four original exercises outside the researched question bank.
 **Original batch language:** Python. The second batch deliberately adds another Node
 exercise now that runtime metadata and catalog validation support it.
 
