@@ -4,6 +4,20 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  NODE_BASE: node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+  PYTHON_BASE: python:3.13-slim-bookworm@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e
+  WORKER_PYTHON_BASE: python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
+  DOCKER_CLI_BASE: docker:29-cli@sha256:3f4743208d2338c934d7b8bcfbe1bb54c0b2355c510ad5e0f31c0c4a54bd704e
+  POSTGRES_IMAGE: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+  TRIVY_IMAGE: aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
+  SBOM_GENERATOR: docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+  SKOPEO_IMAGE: quay.io/skopeo/stable:latest@sha256:2a0046b50fd80ef7a9e2e79587d800292ea7437c81d9cdc058b05448f8b1a999
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+
 jobs:
   backend-tests:
     name: Backend tests
@@ -12,8 +26,10 @@ jobs:
       run:
         working-directory: greenline/backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -28,11 +44,13 @@ jobs:
       run:
         working-directory: greenline
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
       - name: Install backend dependencies
@@ -47,8 +65,10 @@ jobs:
       run:
         working-directory: greenline/frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
           cache: npm
@@ -61,3 +81,249 @@ jobs:
         run: npm run lint
       - name: Build
         run: npm run build
+
+  image-security:
+    name: Images, supply chain, and deployment smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Require production frontend identity configuration
+        if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+        run: |
+          case "$VITE_CLERK_PUBLISHABLE_KEY" in
+            pk_test_*|pk_live_*) ;;
+            *)
+              echo "Set the VITE_CLERK_PUBLISHABLE_KEY repository variable before publishing images." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Build runtime images for tests
+        working-directory: greenline
+        run: |
+          docker buildx build --load \
+            --build-arg NODE_BASE="$NODE_BASE" \
+            --build-arg PYTHON_BASE="$PYTHON_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" \
+            --target control-plane \
+            --tag greenline-control-plane:ci .
+          docker buildx build --load --file Dockerfile.worker \
+            --build-arg PYTHON_BASE="$WORKER_PYTHON_BASE" \
+            --build-arg DOCKER_CLI_BASE="$DOCKER_CLI_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --target execution-worker \
+            --tag greenline-execution-worker:ci .
+          docker buildx build --load \
+            --build-arg PYTHON_BASE_IMAGE="$PYTHON_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --tag greenline-python-execution:ci \
+            backend/execution-images/python
+          docker buildx build --load \
+            --build-arg NODE_BASE_IMAGE="$NODE_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --tag greenline-node-execution:ci \
+            backend/execution-images/node
+
+      - name: Scan fixable high and critical vulnerabilities
+        working-directory: greenline
+        env:
+          CONTROL_IMAGE: greenline-control-plane:ci
+          WORKER_IMAGE: greenline-execution-worker:ci
+          PYTHON_EXECUTION_IMAGE: greenline-python-execution:ci
+          NODE_EXECUTION_IMAGE: greenline-node-execution:ci
+          SBOM_DIR: ${{ github.workspace }}/greenline/supply-chain
+        run: sh scripts/scan_images.sh
+
+      - name: Smoke Hosted process roles
+        working-directory: greenline
+        env:
+          CONTROL_IMAGE: greenline-control-plane:ci
+          WORKER_IMAGE: greenline-execution-worker:ci
+          POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
+        run: |
+          PYTHON_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' greenline-python-execution:ci)
+          NODE_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' greenline-node-execution:ci)
+          export PYTHON_EXECUTION_IMAGE NODE_EXECUTION_IMAGE
+          sh scripts/smoke_images.sh
+
+      - name: Export SBOM and maximum-provenance OCI artifacts
+        working-directory: greenline
+        run: |
+          docker buildx build \
+            --build-arg NODE_BASE="$NODE_BASE" \
+            --build-arg PYTHON_BASE="$PYTHON_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" \
+            --attest type=sbom,generator="$SBOM_GENERATOR" \
+            --attest type=provenance,mode=max \
+            --output type=oci,dest=supply-chain/control-plane.oci.tar .
+          docker buildx build --file Dockerfile.worker \
+            --build-arg PYTHON_BASE="$WORKER_PYTHON_BASE" \
+            --build-arg DOCKER_CLI_BASE="$DOCKER_CLI_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --attest type=sbom,generator="$SBOM_GENERATOR" \
+            --attest type=provenance,mode=max \
+            --output type=oci,dest=supply-chain/execution-worker.oci.tar .
+          docker buildx build \
+            --build-arg PYTHON_BASE_IMAGE="$PYTHON_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --attest type=sbom,generator="$SBOM_GENERATOR" \
+            --attest type=provenance,mode=max \
+            --output type=oci,dest=supply-chain/python-execution.oci.tar \
+            backend/execution-images/python
+          docker buildx build \
+            --build-arg NODE_BASE_IMAGE="$NODE_BASE" \
+            --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --attest type=sbom,generator="$SBOM_GENERATOR" \
+            --attest type=provenance,mode=max \
+            --output type=oci,dest=supply-chain/node-execution.oci.tar \
+            backend/execution-images/node
+
+      - name: Verify published payloads are the scanned runtime manifests
+        working-directory: greenline
+        env:
+          ARCHIVE_DIR: ${{ github.workspace }}/greenline/supply-chain
+        run: sh scripts/verify_image_archives.sh
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: greenline-supply-chain-${{ github.sha }}
+          path: greenline/supply-chain/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-images:
+    name: Publish immutable release images
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+    needs: [backend-tests, challenge-validation, frontend, image-security]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: greenline-supply-chain-${{ github.sha }}
+          path: supply-chain
+
+      - name: Authenticate OCI publisher
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/greenline-registry-auth"
+          chmod 0700 "$RUNNER_TEMP/greenline-registry-auth"
+          printf '%s' "$REGISTRY_TOKEN" | docker run --rm --interactive \
+            --mount "type=bind,src=$RUNNER_TEMP/greenline-registry-auth,dst=/auth" \
+            "$SKOPEO_IMAGE" login --authfile /auth/config.json \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+
+      - name: Publish the scanned archives without rebuilding
+        id: publish
+        env:
+          ARCHIVE_DIR: ${{ github.workspace }}/supply-chain
+          AUTH_FILE: ${{ runner.temp }}/greenline-registry-auth/config.json
+          OUTPUT_DIR: ${{ runner.temp }}/greenline-release
+          SOURCE_TAG: sha-${{ github.sha }}
+        run: |
+          REGISTRY_ROOT=$(printf '%s' "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          export REGISTRY_ROOT
+          sh greenline/scripts/publish_images.sh
+          cat "$OUTPUT_DIR/github-outputs" >> "$GITHUB_OUTPUT"
+          . "$OUTPUT_DIR/github-outputs"
+          jq -n \
+            --arg source_sha "$GITHUB_SHA" \
+            --arg source_ref "$GITHUB_REF" \
+            --arg workflow_run "$GITHUB_RUN_ID" \
+            --arg control_plane "$REGISTRY_ROOT-control-plane@$control_plane_digest" \
+            --arg execution_worker "$REGISTRY_ROOT-execution-worker@$execution_worker_digest" \
+            --arg python_execution "$REGISTRY_ROOT-python-execution@$python_execution_digest" \
+            --arg node_execution "$REGISTRY_ROOT-node-execution@$node_execution_digest" \
+            '{schema_version: 1, source_sha: $source_sha, source_ref: $source_ref,
+              workflow_run: $workflow_run, images: {control_plane: $control_plane,
+              execution_worker: $execution_worker, python_execution: $python_execution,
+              node_execution: $node_execution}}' \
+            > "$OUTPUT_DIR/release-manifest.json"
+
+      - name: Attest control-plane provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-control-plane
+          subject-digest: ${{ steps.publish.outputs.control_plane_digest }}
+          push-to-registry: true
+      - name: Attest control-plane SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-control-plane
+          subject-digest: ${{ steps.publish.outputs.control_plane_digest }}
+          sbom-path: supply-chain/control-plane.spdx.json
+          push-to-registry: true
+      - name: Attest execution-worker provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-execution-worker
+          subject-digest: ${{ steps.publish.outputs.execution_worker_digest }}
+          push-to-registry: true
+      - name: Attest execution-worker SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-execution-worker
+          subject-digest: ${{ steps.publish.outputs.execution_worker_digest }}
+          sbom-path: supply-chain/execution-worker.spdx.json
+          push-to-registry: true
+      - name: Attest Python execution provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-python-execution
+          subject-digest: ${{ steps.publish.outputs.python_execution_digest }}
+          push-to-registry: true
+      - name: Attest Python execution SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-python-execution
+          subject-digest: ${{ steps.publish.outputs.python_execution_digest }}
+          sbom-path: supply-chain/python-execution.spdx.json
+          push-to-registry: true
+      - name: Attest Node execution provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-node-execution
+          subject-digest: ${{ steps.publish.outputs.node_execution_digest }}
+          push-to-registry: true
+      - name: Attest Node execution SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ steps.publish.outputs.registry_root }}-node-execution
+          subject-digest: ${{ steps.publish.outputs.node_execution_digest }}
+          sbom-path: supply-chain/node-execution.spdx.json
+          push-to-registry: true
+
+      - name: Attest release manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/greenline-release/release-manifest.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: greenline-release-${{ github.sha }}
+          path: ${{ runner.temp }}/greenline-release/release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
