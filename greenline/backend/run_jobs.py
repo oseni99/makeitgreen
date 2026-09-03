@@ -27,6 +27,9 @@ class RunJobStore:
         self._terminal_job_limit = terminal_job_limit
         self._terminal_jobs: deque[str] = deque()
 
+    def check_ready(self) -> None:
+        return None
+
     def _record_terminal(self, job_id: str) -> None:
         """Keep active jobs plus a bounded history ordered by completion time.
 

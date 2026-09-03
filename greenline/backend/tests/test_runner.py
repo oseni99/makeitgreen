@@ -1,3 +1,5 @@
+"""ExecutionAdapter contract tests for the LocalSubprocessAdapter."""
+
 import os
 import signal
 import time
@@ -8,6 +10,18 @@ import pytest
 
 import challenges
 import runner
+
+
+def _execute(
+    slug: str,
+    on_output=None,
+    user_id: str | None = None,
+) -> runner.ChallengeRunResult:
+    adapter: runner.ExecutionAdapter = runner.LocalSubprocessAdapter()
+    return adapter.execute(
+        runner.ChallengeRun(slug=slug, user_id=user_id),
+        on_output=on_output,
+    )
 
 
 def _process_exists(pid: int) -> bool:
@@ -41,7 +55,7 @@ def test_structured_results_report_per_test_outcomes(
     monkeypatch.setattr(runner, "repo_dir", lambda slug: repo)
     monkeypatch.setattr(runner, "workspace_dir", lambda slug: workspace)
 
-    result = runner.run_tests("structured-results")
+    result = _execute("structured-results")
 
     assert result["passed"] == 1
     assert result["failed"] == 1
@@ -85,7 +99,7 @@ def test_timeout_terminates_descendant_processes(
     monkeypatch.setattr(runner, "workspace_dir", lambda slug: workspace)
     monkeypatch.setattr(runner, "TIMEOUT_SECONDS", 0.5)
 
-    result = runner.run_tests("timeout-regression")
+    result = _execute("timeout-regression")
     assert child_pid_file.is_file()
     child_pid = int(child_pid_file.read_text())
 
@@ -123,7 +137,7 @@ def test_all_pass_is_green(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         "def test_one():\n    assert True\n\ndef test_two():\n    assert 1 + 1 == 2\n",
     )
 
-    result = runner.run_tests("all-pass")
+    result = _execute("all-pass")
 
     assert result["exit_code"] == 0
     assert result["green"] is True
@@ -140,7 +154,7 @@ def test_all_fail_is_not_green(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         "def test_a():\n    assert False\n\ndef test_b():\n    assert 0\n",
     )
 
-    result = runner.run_tests("all-fail")
+    result = _execute("all-fail")
 
     assert result["exit_code"] != 0
     assert result["green"] is False
@@ -153,7 +167,7 @@ def test_no_tests_collected_is_deterministic(
 ) -> None:
     _tiny_repo(tmp_path, monkeypatch, tests_src=None)
 
-    result = runner.run_tests("no-tests")
+    result = _execute("no-tests")
 
     assert result["exit_code"] != 0
     assert result["green"] is False
@@ -177,7 +191,7 @@ def test_stdout_and_stderr_appear_in_output(
         "    assert False\n",
     )
 
-    result = runner.run_tests("streams")
+    result = _execute("streams")
 
     assert "STDOUT_MARKER_GL" in result["output"]
     assert "STDERR_MARKER_GL" in result["output"]
@@ -196,7 +210,7 @@ def test_output_truncated_to_last_20000_chars(
         "    assert False\n",
     )
 
-    result = runner.run_tests("truncate")
+    result = _execute("truncate")
 
     assert len(result["output"]) <= runner.OUTPUT_LIMIT
     assert result["output_truncated"] is True
@@ -229,7 +243,7 @@ def test_loud_run_retains_only_a_bounded_tail_while_streaming_all_output(
 
     tracemalloc.start()
     try:
-        result = runner.run_tests("bounded-tail", observe)
+        result = _execute("bounded-tail", observe)
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
@@ -243,21 +257,31 @@ def test_loud_run_retains_only_a_bounded_tail_while_streaming_all_output(
     assert peak_bytes < 4_000_000
 
 
-@pytest.mark.parametrize(
-    "summary, expected",
-    [
-        ("2 failed, 1 passed", {"passed": 1, "failed": 2, "errors": 0}),
-        ("1 error", {"passed": 0, "failed": 0, "errors": 1}),
-        ("3 passed", {"passed": 3, "failed": 0, "errors": 0}),
-        ("1 failed, 2 passed, 1 error", {"passed": 2, "failed": 1, "errors": 1}),
-        ("2 errors, 3 passed, 1 failed", {"passed": 3, "failed": 1, "errors": 2}),
-        ("# tests 6\n# pass 5\n# fail 1", {"passed": 5, "failed": 1, "errors": 0}),
-    ],
-)
-def test_parse_counts_reads_pytest_summaries(
-    summary: str, expected: dict[str, int]
+def test_text_runtime_summary_is_normalized_through_the_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert runner._parse_counts(summary) == expected
+    _tiny_repo(tmp_path, monkeypatch, tests_src=None)
+    monkeypatch.setattr(
+        runner.challenges,
+        "load",
+        lambda _slug: {
+            "runtime": {
+                "kind": "node",
+                "command": [
+                    "{python}",
+                    "-c",
+                    "print('# tests 6\\n# pass 5\\n# fail 1')",
+                ],
+                "report": "text",
+            }
+        },
+    )
+
+    result = _execute("text-summary")
+
+    assert result["passed"] == 5
+    assert result["failed"] == 1
+    assert result["errors"] == 0
 
 
 def test_run_revalidates_persisted_workspace_before_overlay(
@@ -282,7 +306,30 @@ def test_run_revalidates_persisted_workspace_before_overlay(
     monkeypatch.setattr(runner, "workspace_dir", challenges.workspace_dir)
 
     with pytest.raises(challenges.InvalidPath):
-        runner.run_tests("guarded")
+        _execute("guarded")
+
+
+def test_run_revalidates_a_durable_workspace_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    challenge_root = tmp_path / "challenges" / "guarded-snapshot"
+    repo = challenge_root / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (challenge_root / "challenge.json").write_text(
+        '{"readonly":["tests/"],"creatable":["src/"]}'
+    )
+    (repo / "tests" / "test_guard.py").write_text("def test_red(): assert False\n")
+    monkeypatch.setattr(challenges, "CHALLENGES_DIR", tmp_path / "challenges")
+    monkeypatch.setattr(runner, "repo_dir", challenges.repo_dir)
+
+    adapter: runner.ExecutionAdapter = runner.LocalSubprocessAdapter()
+    with pytest.raises(challenges.InvalidPath):
+        adapter.execute(
+            runner.ChallengeRun(
+                slug="guarded-snapshot",
+                workspace={"tests/test_guard.py": "def test_green(): assert True\n"},
+            )
+        )
 
 
 def test_stream_callback_receives_output_before_result(
@@ -291,7 +338,33 @@ def test_stream_callback_receives_output_before_result(
     _tiny_repo(tmp_path, monkeypatch, "def test_visible():\n    assert False\n")
     chunks: list[str] = []
 
-    result = runner.run_tests("streamed", chunks.append)
+    result = _execute("streamed", chunks.append)
 
     assert result["green"] is False
     assert "test_visible" in "".join(chunks)
+
+
+def test_challenge_run_uses_only_the_requested_users_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    challenge = tmp_path / "challenges" / "scoped"
+    repo = challenge / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (challenge / "challenge.json").write_text(
+        '{"title":"Scoped","type":"Test","difficulty":"Easy"}'
+    )
+    (repo / "value.py").write_text("VALUE = 'original'\n")
+    (repo / "tests" / "test_value.py").write_text(
+        "from value import VALUE\n\ndef test_value():\n    assert VALUE == 'edited'\n"
+    )
+    monkeypatch.setattr(challenges, "CHALLENGES_DIR", tmp_path / "challenges")
+    monkeypatch.setattr(challenges, "WORKSPACES_DIR", tmp_path / "workspaces")
+    monkeypatch.setattr(runner, "repo_dir", challenges.repo_dir)
+    monkeypatch.setattr(runner, "workspace_dir", challenges.workspace_dir)
+    challenges.write_file("scoped", "value.py", "VALUE = 'edited'\n", "user-a")
+
+    user_a = _execute("scoped", user_id="user-a")
+    user_b = _execute("scoped", user_id="user-b")
+
+    assert user_a["green"] is True
+    assert user_b["green"] is False

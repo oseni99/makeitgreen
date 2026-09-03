@@ -1,6 +1,7 @@
-fastapi==0.115.*
+fastapi==0.141.*
 uvicorn==0.32.*
 pytest==8.*
 pytest-json-report==1.*
 httpx==0.28.*
-clerk-backend-api==3.*
+clerk-backend-api==7.0.*
+psycopg[binary,pool]==3.2.*

@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+
+# Use compatible Linux images approved and pinned to OCI index digests.
+ARG PYTHON_BASE
+ARG DOCKER_CLI_BASE
+
+FROM ${DOCKER_CLI_BASE} AS docker-cli
+ARG DOCKER_CLI_BASE
+RUN digest="${DOCKER_CLI_BASE##*@sha256:}"; \
+    [ "$digest" != "$DOCKER_CLI_BASE" ] && [ "${#digest}" -eq 64 ] && \
+    ! printf '%s' "$digest" | grep -q '[^0-9a-f]'
+
+FROM ${PYTHON_BASE} AS dependencies
+ARG PYTHON_BASE
+RUN digest="${PYTHON_BASE##*@sha256:}"; \
+    [ "$digest" != "$PYTHON_BASE" ] && [ "${#digest}" -eq 64 ] && \
+    ! printf '%s' "$digest" | grep -q '[^0-9a-f]'
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+RUN python -m venv /opt/greenline-venv
+COPY backend/requirements-worker.txt /tmp/requirements-worker.txt
+RUN /opt/greenline-venv/bin/pip install --requirement /tmp/requirements-worker.txt
+
+FROM ${PYTHON_BASE} AS execution-worker
+ARG SOURCE_URL
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.source=${SOURCE_URL} \
+    org.opencontainers.image.revision=${SOURCE_REVISION}
+ENV PATH=/opt/greenline-venv/bin:$PATH \
+    HOME=/tmp \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    GREENLINE_MODE=hosted \
+    GREENLINE_PROCESS_ROLE=worker \
+    GREENLINE_RELEASE_SHA=${SOURCE_REVISION} \
+    GREENLINE_RUN_BUNDLE_DIR=/run-bundles
+WORKDIR /app/backend
+COPY --from=dependencies /opt/greenline-venv /opt/greenline-venv
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+RUN /usr/local/bin/python -m pip uninstall --yes pip && \
+    /opt/greenline-venv/bin/python -m pip uninstall --yes pip
+COPY backend/*.py ./
+COPY challenges /app/challenges
+RUN mkdir /run-bundles && chown 65532:65532 /run-bundles
+USER 65532:65532
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=8s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import worker; runtime = worker.compose_worker(); runtime.close()"]
+CMD ["python", "worker.py"]
