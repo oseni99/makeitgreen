@@ -1,0 +1,166 @@
+name: Promote or roll back Greenline images
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character commit SHA of an immutable published release
+        required: true
+        type: string
+      target:
+        description: Protected environment and registry tag to update
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      operation:
+        description: Audit classification for this digest change
+        required: true
+        type: choice
+        options:
+          - promote
+          - rollback
+
+permissions:
+  contents: read
+
+concurrency:
+  group: greenline-${{ inputs.target }}-image-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: ${{ inputs.operation }} ${{ inputs.source_sha }} to ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.target }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      SKOPEO_IMAGE: quay.io/skopeo/stable:latest@sha256:2a0046b50fd80ef7a9e2e79587d800292ea7437c81d9cdc058b05448f8b1a999
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Require deliberate environment protection configuration
+        env:
+          PROMOTION_GATE: ${{ vars.GREENLINE_PROMOTION_GATE }}
+          RELEASE_HEALTH_URL: ${{ vars.GREENLINE_RELEASE_HEALTH_URL }}
+        run: |
+          if [ "$PROMOTION_GATE" != "protected-v1" ]; then
+            echo "Set GREENLINE_PROMOTION_GATE=protected-v1 on the protected environment before promotion." >&2
+            exit 1
+          fi
+          case "$RELEASE_HEALTH_URL" in
+            https://*) ;;
+            *)
+              echo "Set GREENLINE_RELEASE_HEALTH_URL to the environment's HTTPS /health/release endpoint." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Authenticate OCI promoter
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/greenline-registry-auth"
+          chmod 0700 "$RUNNER_TEMP/greenline-registry-auth"
+          printf '%s' "$REGISTRY_TOKEN" | docker run --rm --interactive \
+            --mount "type=bind,src=$RUNNER_TEMP/greenline-registry-auth,dst=/auth" \
+            "$SKOPEO_IMAGE" login --authfile /auth/config.json \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+
+      - name: Move environment tags to the selected release digests
+        id: promotion
+        env:
+          AUTH_FILE: ${{ runner.temp }}/greenline-registry-auth/config.json
+          OPERATION: ${{ inputs.operation }}
+          SOURCE_TAG: sha-${{ inputs.source_sha }}
+          TARGET_TAG: ${{ inputs.target }}
+          RECORD_FILE: ${{ runner.temp }}/greenline-promotion/changes.tsv
+        run: |
+          mkdir -p "$RUNNER_TEMP/greenline-promotion"
+          REGISTRY_ROOT=$(printf '%s' "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          export REGISTRY_ROOT
+          sh greenline/scripts/promote_images.sh
+          jq -Rn \
+            '[inputs | split("\t") | {component: .[0],
+              previous_digest: (if .[1] == "none" then null else .[1] end),
+              promoted_digest: .[2]}]' \
+            < "$RECORD_FILE" > "$RUNNER_TEMP/greenline-promotion/changes.json"
+          jq -n \
+            --arg operation "$OPERATION" \
+            --arg target "$TARGET_TAG" \
+            --arg source_sha "${SOURCE_TAG#sha-}" \
+            --arg actor "$GITHUB_ACTOR" \
+            --arg workflow_run "$GITHUB_RUN_ID" \
+            --arg promoted_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --slurpfile changes "$RUNNER_TEMP/greenline-promotion/changes.json" \
+            '{schema_version: 1, operation: $operation, target: $target,
+              source_sha: $source_sha, actor: $actor, workflow_run: $workflow_run,
+              promoted_at: $promoted_at, images: $changes[0]}' \
+            > "$RUNNER_TEMP/greenline-promotion/promotion-record.json"
+          jq . "$RUNNER_TEMP/greenline-promotion/promotion-record.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify exact release rollout or restore previous digests
+        env:
+          AUTH_FILE: ${{ runner.temp }}/greenline-registry-auth/config.json
+          EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+          PROMOTION_RECORD: ${{ runner.temp }}/greenline-promotion/changes.tsv
+          RELEASE_HEALTH_URL: ${{ vars.GREENLINE_RELEASE_HEALTH_URL }}
+          ROLLBACK_RECORD: ${{ runner.temp }}/greenline-promotion/automatic-rollback.tsv
+          TARGET_TAG: ${{ inputs.target }}
+        run: |
+          if sh greenline/scripts/wait_for_release.sh; then
+            jq -n \
+              --arg status healthy \
+              --arg source_sha "$EXPECTED_SOURCE_SHA" \
+              --arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{schema_version: 1, status: $status, source_sha: $source_sha,
+                checked_at: $checked_at, automatic_rollback: false}' \
+              > "$RUNNER_TEMP/greenline-promotion/rollout-record.json"
+            exit 0
+          fi
+
+          REGISTRY_ROOT=$(printf '%s' "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          export REGISTRY_ROOT
+          rollback_status=restored
+          if ! sh greenline/scripts/restore_images.sh; then
+            rollback_status=failed
+          fi
+          jq -n \
+            --arg status unhealthy \
+            --arg source_sha "$EXPECTED_SOURCE_SHA" \
+            --arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg rollback_status "$rollback_status" \
+            '{schema_version: 1, status: $status, source_sha: $source_sha,
+              checked_at: $checked_at, automatic_rollback: true,
+              automatic_rollback_status: $rollback_status}' \
+            > "$RUNNER_TEMP/greenline-promotion/rollout-record.json"
+          jq . "$RUNNER_TEMP/greenline-promotion/rollout-record.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "The selected release failed exact-version readiness; automatic rollback status: $rollback_status" >&2
+          exit 1
+
+      - name: Attest promotion and rollout records
+        if: always() && steps.promotion.outcome == 'success'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/greenline-promotion/*.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always() && steps.promotion.outcome == 'success'
+        with:
+          name: greenline-${{ inputs.operation }}-${{ inputs.target }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/greenline-promotion/*.json
+            ${{ runner.temp }}/greenline-promotion/*.tsv
+          if-no-files-found: error
+          retention-days: 90
