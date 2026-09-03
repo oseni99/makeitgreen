@@ -13,7 +13,12 @@ greenline/
 ├── backend/          FastAPI
 │   ├── app.py        HTTP API (challenges, files, run, reset, solution)
 │   ├── challenges.py challenge discovery + file access (path-traversal safe)
-│   ├── runner.py     test sandbox: temp-dir copy + user-edit overlay + pytest with timeout
+│   ├── runner.py     Challenge Run interface + local and container adapters
+│   ├── learner_state.py local and PostgreSQL learner-state adapters
+│   ├── run_coordination.py PostgreSQL Run Jobs + fenced workers
+│   ├── worker.py        Hosted execution-worker entrypoint
+│   ├── serve.py         Hosted control-plane entrypoint
+│   ├── abuse_controls.py request admission, body/rate limits, audit
 │   ├── progress.py   SQLite progress store (todo / attempted / solved)
 │   └── data/         workspaces (user edits) + progress.db  [gitignore-able]
 ├── challenges/       content: one folder per challenge
@@ -32,10 +37,19 @@ Inter typography, one structural blue accent, restrained elevation, and decorati
 sticker colors that never compete with actions. Tailwind utilities are the default;
 custom CSS remains only where the editor and specialized content rendering require it.
 
-How a test run works: the runner copies `repo/` into a temp dir, overlays any
+How a Challenge Run works: the selected execution adapter receives one normalized
+request. The Local Mode adapter copies `repo/` into a temp dir, overlays any
 files you edited in the browser (stored in `backend/data/workspaces/<slug>/`),
 runs the challenge's declared test command with a 60s timeout, parses the counts, and records progress.
 Going green marks the challenge solved.
+
+The container adapter supplies the same normalized result while running a
+validated, user-scoped Run Bundle in a fresh Docker container. It uses
+digest-pinned preloaded images, no network, a read-only root filesystem,
+non-root execution, dropped capabilities, no privilege escalation, a read-only
+host mount, bounded tmpfs work areas, and CPU/memory/PID/wall-clock limits. See
+[`backend/execution-images/README.md`](backend/execution-images/README.md) for
+the image contract.
 
 ## Run it
 
@@ -53,6 +67,115 @@ npm run dev
 ```
 
 Open http://localhost:5173.
+
+For Hosted Mode, run `./venv/bin/python serve.py` for the public control plane
+and `./venv/bin/python worker.py` as a separate execution worker. The API
+launcher applies the explicit
+`GREENLINE_TRUSTED_PROXY_CIDRS` allowlist; Hosted composition rejects a missing
+launcher marker, wildcard proxy trust, or missing security-log HMAC key.
+
+`GREENLINE_MODE` is mandatory. Use `local` for the trusted personal workflow.
+`hosted` never falls back to host subprocess execution. The public API installs
+a disabled execution Adapter and only enqueues durable work; it must not receive
+a Docker socket or Docker CLI. The worker is the only process that recognizes
+the container execution Adapter. Learner Challenge State stores
+workspace overlays, progress, and run history transactionally in PostgreSQL.
+Hosted Mode uses PostgreSQL Run Jobs and fenced cross-replica operation leases;
+disposable workers cannot commit after their claim is superseded. PostgreSQL
+request admission adds per-learner budgets, durable audit events, and global and
+per-learner active-run capacity. Oversized bodies are rejected before parsing.
+Worker startup verifies the Docker daemon and both immutable execution images.
+The API's `/health/ready` checks its PostgreSQL dependencies only, so execution
+capacity loss cannot remove the control plane used to observe queued jobs.
+`/health/release` applies the same readiness checks and reports the immutable
+build commit, allowing promotion automation to reject a still-healthy old
+revision.
+
+### Production control-plane image
+
+The root `Dockerfile` builds the Vite frontend and FastAPI backend into one
+non-root control-plane image. Base images are deliberately required build args;
+pass only references approved and pinned to an OCI index digest:
+
+```bash
+docker build \
+  --build-arg NODE_BASE='node:22-bookworm-slim@sha256:<approved-index-digest>' \
+  --build-arg PYTHON_BASE='python:3.13-slim-bookworm@sha256:<approved-index-digest>' \
+  --build-arg SOURCE_REVISION='<full-40-character-commit-sha>' \
+  --build-arg VITE_CLERK_PUBLISHABLE_KEY='pk_live_...' \
+  --target control-plane \
+  -t greenline-control-plane .
+```
+
+Run it with a read-only root filesystem, all capabilities dropped, and a small
+temporary filesystem if the platform requires `/tmp`. Do not mount the Docker
+socket into this container. Deliver Clerk, database, and log-HMAC secrets by
+mounted files and set the trusted proxy CIDRs at deployment time.
+
+### Production execution-worker image
+
+`Dockerfile.worker` builds a separate numeric non-root image containing the
+worker, PostgreSQL driver, challenge catalog, and Docker CLI—but no HTTP server,
+Clerk SDK, or frontend. Both bases must be compatible Linux images pinned to
+approved OCI index digests:
+
+```bash
+docker build -f Dockerfile.worker \
+  --build-arg PYTHON_BASE='python:3.13-alpine@sha256:<approved-index-digest>' \
+  --build-arg DOCKER_CLI_BASE='docker:29-cli@sha256:<approved-index-digest>' \
+  --target execution-worker \
+  -t greenline-execution-worker .
+```
+
+Give this image access only to a dedicated, preferably rootless Docker daemon.
+Docker socket or `docker` group access is host-control authority; never share it
+with the Control Plane. A network daemon must use authenticated TLS. The worker
+and daemon must see the writable Run Bundle root at the same absolute path
+(`GREENLINE_RUN_BUNDLE_DIR`, `/run-bundles` by default in the image), because
+bind sources are resolved on the daemon host. Mount `/tmp` and that path as
+bounded writable filesystems; run the rest read-only with all capabilities
+dropped. The worker healthcheck verifies PostgreSQL, the daemon, preloaded
+immutable execution images, and this shared-path contract before it is healthy.
+Give the worker at least 75 seconds of termination grace so an in-flight
+Challenge Run can reach its bounded timeout and remove its container.
+
+### Image release gates
+
+CI builds separate control-plane, worker, Python execution, and Node execution
+images from digest-pinned bases. It exports each root filesystem for a Trivy
+gate on fixable high/critical vulnerabilities, generates SPDX JSON SBOMs, and
+exports OCI archives with embedded SBOM and maximum-provenance attestations.
+Successful default-branch builds publish those exact archives to GHCR under
+immutable commit tags and add GitHub-signed provenance and SBOM attestations.
+Actions, the scanner, PostgreSQL smoke dependency, and BuildKit SBOM generator
+are pinned to immutable commits or image digests.
+
+Final Python runtimes do not retain `pip`. The Node execution image contains the
+built-in `node:test` runner but removes npm, Corepack, and Yarn. The temporary
+Docker CLI exceptions in `.trivyignore.yaml` are scoped to
+`usr/local/bin/docker` and expire on 2026-10-01; refresh the Docker CLI base
+digest before that date rather than extending the exceptions without review.
+
+`scripts/smoke_images.sh` applies migrations to disposable PostgreSQL, starts
+the read-only control-plane and worker images with dropped capabilities, checks
+both health contracts and execution toolchains, and verifies graceful shutdown.
+`scripts/scan_images.sh` scans unpacked runtime filesystems so third-party base
+image SBOM metadata cannot introduce findings for packages absent at runtime.
+Protected-environment promotion and digest rollback are documented in
+[`RELEASES.md`](RELEASES.md).
+
+Apply PostgreSQL migrations outside the application process before deployment;
+see [`backend/migrations/README.md`](backend/migrations/README.md). The runtime
+role should have data access but no schema-changing privileges.
+
+Hosted abuse-control defaults and environment overrides are listed in
+[`backend/.env.example`](backend/.env.example). Rate budgets use fixed one-minute
+windows; audit records retain bounded action/resource metadata, never request
+bodies or learner file paths.
+Operational security events are emitted as collector-ready JSON with
+HMAC-pseudonymized learner subjects and severity levels suitable for alert rules.
+Mounted secret files are supported for Clerk, PostgreSQL, and the logging HMAC
+key; see [AUTH.md](AUTH.md).
 
 Authentication setup is documented in [AUTH.md](AUTH.md). The production
 configuration uses Clerk with Google as the sole sign-in provider.
@@ -151,7 +274,10 @@ gap with file references and suggested implementations. Start there before addin
   commands. Optional Python `requirements.txt` files get content-addressed cached
   environments and are read-only in the workspace; platform dependencies remain
   separate in `backend/requirements.txt`.
-- The "sandbox" is a temp dir + timeout — fine for your own machine, not for
-  hosting untrusted users. Containerize the runner before ever deploying.
+- Local Mode's subprocess Adapter is a temp dir + timeout and remains suitable
+  only for trusted personal use. The container Adapter provides infrastructure
+  isolation, while PostgreSQL provides durable Learner Challenge State, Run
+  Jobs, and operation leases. Hosted Mode remains blocked on the remaining
+  deployment-readiness work documented in `GAPS.md`.
 - Clerk Google sign-in is supported when configured; local development without Clerk
   remains available. Authenticated workspace and progress state is isolated per Clerk user.

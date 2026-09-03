@@ -1,6 +1,6 @@
 # MakeItGreen — Known Gaps & Improvement Backlog
 
-**Last reconciled with the codebase:** 2026-08-31
+**Last reconciled with the codebase:** 2026-09-03
 
 **Audience:** an agent (or engineer) picking up work on this codebase with no prior context.
 Read `README.md` first for architecture and how to run. This document is the honest,
@@ -30,13 +30,14 @@ green run → solved state → solution page). A jsdom React integration test no
 that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
 validate both ways (broken repo fails, solution overlay passes) via
 `scripts/validate_challenges.py`.
-The backend currently has 102 passing platform tests covering file-policy boundaries
-(including new-file create/delete), reset safety, mutation concurrency, malformed
+The backend currently has 182 passing platform tests covering composition/readiness,
+authentication and tenant isolation, file-policy boundaries (including new-file
+create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
 challenge overlays, and API contracts. The current frontend passes `npm test`,
-`npm run lint`, and `npm run build`; its 14 tests comprise nine dependency-free API,
-design-system, standards, and social-metadata checks plus five React integration tests
-covering the practice loop and editor failure navigation. CI is
+`npm run lint`, and `npm run build`; its 21 tests comprise four dependency-free Node
+checks plus 17 Vitest checks covering configured authentication, the design system,
+the practice loop, and editor failure navigation. CI is
 `.github/workflows/greenline.yml`.
 
 ## Open work at a glance
@@ -46,7 +47,7 @@ covering the practice loop and editor failure navigation. CI is
 | Later | Secondary prep-track view and recommended next challenge | Keep curriculum guidance out of the main challenge list for now |
 | Later | Retention practice and weekly publishing workflow | Valuable after the guided track experience is in place |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
-| Later | Production sandbox, identity, tenancy, and deployment | Explicitly deferred for local development, but mandatory before public hosting |
+| Now | Production identity, isolation, durable state, and deployment | Active hardening track; every gate is mandatory before public hosting |
 
 The active roadmap is local-first. Production gaps remain documented as hard hosting
 gates, not as the next implementation target.
@@ -158,13 +159,54 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   first-run environment corruption. The catalog validator uses the same environment
   contract, and environment behavior has dedicated backend regression tests.
 
-### 7. Production hosting is unsafe: no real sandbox, identity, or tenant isolation
+### 7. Production hosting safety modules are implemented; deployment readiness remains
 
-- **Current runner:** `runner.py` copies a repo into a temporary directory and executes
+- **Execution seam:** `runner.py` defines the `ChallengeRun`, normalized result,
+  streaming callback, and `ExecutionAdapter` contract. Trusted host execution lives
+  behind `LocalSubprocessAdapter`; isolated execution lives behind
+  `ContainerExecutionAdapter`. Both consume the same validated user-scoped Run Bundle
+  and return the same normalized result.
+- **Container isolation implemented:** each Run Bundle is mounted read-only into a
+  fresh Docker container and copied into a size-bounded tmpfs workspace. The Adapter
+  requires digest-pinned, preloaded Python and Node images and disables pulling during
+  a run. Its fixed policy disables networking and IPC sharing, makes the root
+  filesystem read-only, runs as a numeric non-root user, drops every capability,
+  forbids privilege escalation, and enforces CPU, memory/swap, PID, file-descriptor,
+  tmpfs, output-tail, and wall-clock limits. Unique names plus a run label support
+  force-removal and orphan reconciliation. Container failures never fall back to the
+  Local Mode Adapter.
+- **Current Local Mode adapter:** it copies a repo into a temporary directory and executes
   it with the backend process's user privileges. The 60-second timeout now terminates
   the full POSIX process group, but there are still no memory/CPU/PID limits, network
   isolation, or filesystem jail. Challenge code can read secrets and mutate anything
   the backend user can access.
+- **Durable Learner Challenge State implemented:** `learner_state.py` defines one
+  Interface for tenant-scoped workspace overlays, progress, run history, workspace
+  snapshots, spoil state, and reset. Local Mode keeps the filesystem/SQLite Adapter.
+  The Hosted Mode Adapter stores the aggregate in PostgreSQL with `(user_id, slug)`
+  keys, transactional run recording, atomic cascading reset, monotonic workspace
+  revisions, bounded output history, and an exact schema-version readiness check.
+  Migrations are explicit deployment artifacts and never run under the application
+  role. Container execution now requires an injected durable workspace snapshot, so
+  it cannot discover or fall back to filesystem learner state.
+- **Durable Run Jobs and leases implemented:** `run_coordination.py` stores queued,
+  running, and terminal jobs in PostgreSQL. Enqueue acquires a monotonically fenced
+  operation lease for one `(user_id, slug)` aggregate. Disposable workers use
+  expiring claim tokens, heartbeat both claim and lease, stream bounded output, and
+  atomically persist progress, Challenge Run history, the terminal result, and lease
+  release. `FOR UPDATE SKIP LOCKED` supports competing workers; stale claims cannot
+  publish output or results. Workspace mutations refuse a live lease and safely retire
+  an expired one. Local Mode retains its in-process implementation.
+- **Abuse controls implemented:** `abuse_controls.py` rejects declared or streamed
+  request bodies over the configured byte limit before parsing. Authenticated Hosted
+  Mode requests use PostgreSQL-backed fixed-window per-learner budgets, with stricter
+  mutation and Challenge Run budgets. Request admission durably creates a bounded,
+  tenant-scoped audit event before route mutation; repeated rate-limit rejections are
+  aggregated per learner/scope/window to prevent audit amplification, and unavailable admission fails closed.
+  Run Job enqueue uses a PostgreSQL transaction advisory lock to enforce global and
+  per-learner active capacity without a cross-replica check-then-insert race. Limits
+  and audit retention are validated immutable startup policy; Local Mode remains
+  unrestricted.
 - **Persisted-overlay trust (local hole closed):** every persisted overlay is now
   canonicalized and rechecked against ignored, read-only, requirements, and creatable
   policies immediately before copying. Invalid or symlinked workspace entries refuse
@@ -178,24 +220,38 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 - **Current API/state:** Clerk bearer-token verification is now available and enforced
   whenever `CLERK_SECRET_KEY` is configured; the frontend exposes Google-only sign-in
   when `VITE_CLERK_PUBLISHABLE_KEY` is configured. Authenticated workspaces, progress,
-  run history, and run-job polling are isolated by Clerk's verified `sub`. CORS is a
+  and run history are isolated by Clerk's verified `sub`. CORS is a
   browser policy, not an access-control boundary;
   non-browser clients can call the code-execution endpoint directly when auth is not
-  configured. There is also no request-size limit, run quota, rate limit, or concurrency
-  cap across slugs.
-  `challenge_locks.py` is intentionally in-process; multiple API processes or replicas
-  would not share its locks, so hosted concurrency needs storage-backed coordination or
-  transactional job ownership.
-- **Production gate:** do not expose the current service to untrusted users. Run each
-  attempt in an ephemeral container or microVM with no host credentials, no network by
-  default, a read-only root filesystem, a dedicated writable work mount, and enforced
-  CPU, memory, PID, output-size, and wall-clock limits. Hosted mode must not silently
-  fall back to the host subprocess runner.
-- **Application gate:** add per-user and global run limits, request/body limits, audit
-  records, and production-safe secret/config handling. Threat-model this flow before
-  deployment work in gap 15.
-- **Suggested sequence:** define the runner interface first, implement a container-backed
-  runner behind it, then harden the existing user-scoped repositories for hosted storage.
+  configured in Local Mode. `challenge_locks.py` remains the Local Mode mechanism;
+  Hosted Mode coordinates and admits requests through PostgreSQL instead.
+- **Fail-closed composition gate:** `GREENLINE_MODE` is mandatory. Local Mode preserves
+  the trusted personal workflow. Hosted Mode requires complete Clerk configuration and
+  PostgreSQL control-plane Adapters. It has a disabled execution Adapter and cannot start
+  its own workers. The separate worker process requires a concrete container Adapter
+  configured with both immutable image digests; arbitrary placeholder objects cannot
+  bypass either process's composition gate. Mismatched capacity policies are rejected.
+- **Role-specific readiness implemented:** API `/health/ready` dynamically checks only
+  the PostgreSQL dependencies needed to admit, enqueue, and observe work. The worker
+  verifies the Docker daemon and both exact digest-pinned execution images before it
+  starts claiming jobs, proves the daemon can bind its shared Run Bundle storage, and
+  never pulls an image. Its container healthcheck repeats the full worker composition.
+  Worker loss no longer makes the public control plane unavailable.
+  `/health/release` adds the immutable build commit to the same readiness contract
+  so rollout automation cannot mistake an old healthy revision for the promoted one.
+- **Operational configuration implemented:** secrets support mutually exclusive direct
+  or absolute mounted-file sources and invalid sources fail without value disclosure.
+  The supported `serve.py` launcher configures Uvicorn with explicit trusted proxy
+  networks; wildcard trust and direct Hosted startup are refused. Security events use
+  server request IDs, bounded fields, severity, and stable HMAC-pseudonymized learner
+  subjects. They are emitted as one-line JSON for collection and alert rules without
+  tokens, raw subjects, request bodies, file paths, or database URLs.
+- **Remaining deployment gate:** do not expose the service to untrusted users yet.
+  The deployment platform must still provide secret delivery/rotation, direct-port
+  network isolation, edge DDoS limits, a JSON-log collector with concrete alert rules,
+  durable audit export, backup/restore drills, and a reviewed threat model.
+- **Suggested sequence:** build the deployable control-plane artifact and threat model,
+  then add backup/restore and deployment smoke-test evidence in gap 15.
 
 ### 8. ~~Runs are synchronous and non-streaming~~ — CLOSED
 
@@ -288,9 +344,10 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 14. ~~Platform test coverage~~ — CLOSED
 
-- **Implemented:** 102 backend tests now also cover `progress.py` (attempts, sticky
+- **Implemented:** 182 backend tests now also cover composition/readiness,
+  authentication, tenant isolation, `progress.py` (attempts, sticky
   `solved_at`, non-downgrade, reset, concurrent SQLite, spoiled), `runner.py`
-  (green/red/no-tests, stdout+stderr, truncation, `_parse_counts`), `challenges.py`
+  (green/red/no-tests, stdout+stderr, truncation, container isolation policy), `challenges.py`
   (overlay `read_file`, `edited`/`new` flags, `solution_files`, metadata shapes),
   and API contracts for catalog/detail/run/solution/spoil.
 - **Content CI:** `scripts/validate_challenges.py` asserts every challenge's
@@ -301,24 +358,56 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   React Router tree and drives catalog → workspace → failing run → edit/save → green
   run → solved state → solution. The HTTP boundary and Monaco widget are replaced with
   deterministic test adapters; page orchestration, navigation, and state transitions
-  remain production code. `npm test` runs this Vitest/jsdom suite after the nine
+  remain production code. `npm test` runs this Vitest/jsdom suite after four
   dependency-free Node checks, so CI executes both layers.
+- **PostgreSQL contracts:** Learner State, Run Jobs/capacity, and request
+  admission/audit behavior run against migrated PostgreSQL when
+  `GREENLINE_TEST_DATABASE_URL` is configured. These are skipped on machines without
+  the disposable integration database.
 
-### 15. No deployment story — DEFERRED UNTIL PRODUCTION WORK
+### 15. Deployment foundation — IN PROGRESS
 
-- **Current:** two dev servers started by hand; frontend `npm run build` output isn't
-  served by anything; no Dockerfile/compose; SQLite + filesystem state live inside
-  `backend/data/`. Database schema creation happens opportunistically on connection;
-  there is no migration system, health/readiness endpoint, structured logging,
-  production configuration validation, backup policy. CI now runs backend tests,
-  challenge validation, and frontend tests/lint/build (gap 14); image scanning and
-  deploy smoke tests are still missing.
+- **Implemented foundation:** application construction now goes through one
+  `create_application` composition interface. Runtime mode and identity configuration
+  are snapshotted and validated before the application is returned. `/health/live`
+  reports process liveness, while `/health/ready` remains closed until FastAPI lifespan
+  startup validates all control-plane PostgreSQL Adapters. A separate fail-closed worker
+  owns container execution. Hosted Mode uses explicit SQL migrations, durable Learner
+  Challenge State, fenced Run Jobs, and PostgreSQL request admission/audit controls.
+- **Implemented packaging:** the multi-stage root `Dockerfile` builds Vite assets and
+  serves them from the FastAPI control plane with API-first route precedence and SPA
+  fallback. Its runtime is numeric non-root, excludes test/development dependencies, and
+  intentionally contains no Docker CLI. Immutable base-image references are mandatory.
+- **Implemented worker artifact:** `Dockerfile.worker` produces a separate numeric
+  non-root worker with only PostgreSQL and Docker-CLI runtime dependencies. It requires
+  digest-pinned compatible bases, a dedicated daemon, preloaded immutable execution
+  images, and a shared absolute Run Bundle path visible to both worker and daemon.
+- **Implemented release gates:** CI builds four runtime images from immutable bases,
+  scans their unpacked filesystems for fixable high/critical vulnerabilities, runs a
+  disposable PostgreSQL/control-plane/worker deployment smoke, emits SPDX SBOMs and
+  maximum-provenance OCI archives, and signs provenance plus SBOM attestations on
+  trusted push builds. Python package installers and Node package managers are absent
+  from final execution images. The only scanner exceptions are path-scoped Docker CLI
+  findings with an automatic 2026-10-01 expiry.
+- **Implemented release control:** successful default-branch builds publish the exact
+  scanned OCI archives to GHCR under collision-protected immutable commit tags. A
+  separate serialized workflow moves existing digests to `staging` or `production`
+  only through deliberately configured GitHub Environments and emits promotion or
+  rollback records. Promotions poll an environment-specific HTTPS release endpoint for
+  the exact commit and automatically restore the complete previous digest set on
+  timeout or unhealthy rollout. Runnable-manifest identity is checked between scanned
+  images and attested archives, and the release records are attested. No promotion or
+  rollback rebuilds an image.
+- **Still current:** Local Mode uses SQLite + filesystem state under `backend/data/`.
+  Production deployment-platform secret rotation, direct-port network isolation, an external log
+  collector/alerts, durable audit export, backup/restore policy and drills, registry
+  retention policy, the hosting platform's tag-watcher/deployment-controller
+  configuration, and permanent external release-record export remain missing.
 - **Suggested:** the web/API control plane may serve `frontend/dist` from one image,
   but untrusted test execution must be a separate isolated runner/job boundary rather
-  than a subprocess in that same container. Move user/progress/run data to durable,
-  user-scoped storage with migrations and backups; keep challenge content versioned or
-  in read-only object storage. Add CI for backend tests, frontend lint/build, challenge
-  validation, image scanning, and deployment smoke tests. Gap 7 is a hard prerequisite.
+  than a subprocess in that same container. Keep challenge content versioned or in
+  read-only object storage. Add backup/restore drills, deployment rollout integration,
+  structured log collection, and operational alerting before public traffic.
 
 ### 16. ~~Runtime state and generated files are not ignored~~ — CLOSED
 
