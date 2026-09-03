@@ -108,9 +108,74 @@ def test_worker_executes_the_enqueued_snapshot_and_publishes_the_result() -> Non
     assert jobs.failed is None
 
 
+class _ReleaseRowsCursor:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _ReleaseRowsConnection:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def execute(self, _query, _args):
+        return _ReleaseRowsCursor(self._rows)
+
+
+class _ReleaseRowsPool:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def connection(self):
+        return _ReleaseRowsConnection(self._rows)
+
+
+def test_release_status_rejects_mixed_or_inconsistent_live_workers() -> None:
+    source_sha = "a" * 40
+    python_image = "greenline-python@sha256:" + "b" * 64
+    node_image = "greenline-node@sha256:" + "c" * 64
+    matching = {
+        "source_sha": source_sha,
+        "python_execution_image": python_image,
+        "node_execution_image": node_image,
+    }
+    mixed_release = {
+        **matching,
+        "source_sha": "d" * 40,
+    }
+    mixed_images = {
+        **matching,
+        "node_execution_image": "greenline-node@sha256:" + "e" * 64,
+    }
+
+    healthy = run_coordination.PostgresRunJobAdapter(
+        _ReleaseRowsPool([matching, matching])
+    ).worker_release_status(source_sha)
+    wrong_release = run_coordination.PostgresRunJobAdapter(
+        _ReleaseRowsPool([matching, mixed_release])
+    ).worker_release_status(source_sha)
+    inconsistent_images = run_coordination.PostgresRunJobAdapter(
+        _ReleaseRowsPool([matching, mixed_images])
+    ).worker_release_status(source_sha)
+
+    assert healthy.ready is True
+    assert healthy.live_workers == healthy.matching_workers == 2
+    assert healthy.python_execution_image == python_image
+    assert wrong_release.ready is False
+    assert inconsistent_images.ready is False
+
+
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-3 PostgreSQL integration database",
+    reason="requires a schema-version-4 PostgreSQL integration database",
 )
 def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]
@@ -173,7 +238,7 @@ def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-3 PostgreSQL integration database",
+    reason="requires a schema-version-4 PostgreSQL integration database",
 )
 def test_postgres_run_admission_enforces_per_user_capacity_across_challenges() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]

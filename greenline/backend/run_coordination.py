@@ -21,6 +21,7 @@ CLAIM_SECONDS = 30
 QUEUE_LEASE_SECONDS = 90
 MAX_CLAIM_ATTEMPTS = 3
 TERMINAL_RETENTION_SECONDS = 3600
+WORKER_RELEASE_MAX_AGE_SECONDS = 45
 
 
 class RunJobsUnavailable(RuntimeError):
@@ -75,6 +76,15 @@ class RunCompletion:
     started_at: str
     duration_ms: int
     result: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class WorkerReleaseStatus:
+    ready: bool
+    live_workers: int
+    matching_workers: int
+    python_execution_image: str | None = None
+    node_execution_image: str | None = None
 
 
 class RunJobAdapter(Protocol):
@@ -328,6 +338,54 @@ class PostgresRunJobAdapter:
             ).fetchone()
             if job is None or state is None:
                 raise StaleRunJobClaim("Run Job claim is stale")
+
+    def report_worker_release(
+        self,
+        worker_id: str,
+        source_sha: str,
+        python_execution_image: str,
+        node_execution_image: str,
+    ) -> None:
+        """Publish listener-free proof that this worker's runtime is ready."""
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO worker_releases "
+                "(worker_id, source_sha, python_execution_image, "
+                "node_execution_image, checked_at) VALUES (%s, %s, %s, %s, now()) "
+                "ON CONFLICT (worker_id) DO UPDATE SET source_sha = EXCLUDED.source_sha, "
+                "python_execution_image = EXCLUDED.python_execution_image, "
+                "node_execution_image = EXCLUDED.node_execution_image, checked_at = now()",
+                (
+                    worker_id,
+                    source_sha,
+                    python_execution_image,
+                    node_execution_image,
+                ),
+            )
+
+    def worker_release_status(self, source_sha: str) -> WorkerReleaseStatus:
+        """Require every live worker to attest one identical requested release."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT source_sha, python_execution_image, node_execution_image "
+                "FROM worker_releases WHERE checked_at >= now() - "
+                "(%s * interval '1 second')",
+                (WORKER_RELEASE_MAX_AGE_SECONDS,),
+            ).fetchall()
+        matching = [row for row in rows if row["source_sha"] == source_sha]
+        image_sets = {
+            (row["python_execution_image"], row["node_execution_image"])
+            for row in matching
+        }
+        ready = bool(rows) and len(matching) == len(rows) and len(image_sets) == 1
+        images = next(iter(image_sets)) if ready else (None, None)
+        return WorkerReleaseStatus(
+            ready=ready,
+            live_workers=len(rows),
+            matching_workers=len(matching),
+            python_execution_image=images[0],
+            node_execution_image=images[1],
+        )
 
     def append_output(self, claim: RunJobClaim, chunk: str) -> None:
         with self._connection() as conn:

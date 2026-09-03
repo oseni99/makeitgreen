@@ -1080,12 +1080,31 @@ def create_application(
 
     def release() -> JSONResponse:
         is_ready = current_readiness()
+        worker_release = None
+        if is_ready and settings.mode is RuntimeMode.HOSTED:
+            try:
+                worker_release = settings.run_jobs_adapter.worker_release_status(
+                    settings.release_sha
+                )
+                is_ready = worker_release.ready
+            except run_coordination.RunJobsUnavailable:
+                is_ready = False
+        content = {
+            "status": "ready" if is_ready else "not_ready",
+            "source_sha": settings.release_sha,
+        }
+        if worker_release is not None:
+            content["worker"] = {
+                "status": "ready" if worker_release.ready else "not_ready",
+                "live_workers": worker_release.live_workers,
+                "matching_workers": worker_release.matching_workers,
+                "source_sha": settings.release_sha,
+                "python_execution_image": worker_release.python_execution_image,
+                "node_execution_image": worker_release.node_execution_image,
+            }
         return JSONResponse(
             status_code=200 if is_ready else 503,
-            content={
-                "status": "ready" if is_ready else "not_ready",
-                "source_sha": settings.release_sha,
-            },
+            content=content,
         )
 
     application.add_api_route("/health/live", live, methods=["GET"])

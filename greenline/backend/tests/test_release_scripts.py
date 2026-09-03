@@ -39,6 +39,9 @@ def _fake_docker(tmp_path: Path) -> Path:
         "source = 'sha256:' + hashlib.sha256(f'source:{component}'.encode()).hexdigest()\n"
         "previous = 'sha256:' + hashlib.sha256(f'previous:{component}'.encode()).hexdigest()\n"
         "if 'inspect' in args:\n"
+        "    if (os.environ.get('FAKE_SOURCE_INSPECT_FAILURE_COMPONENT') == component\n"
+        "            and (ref.startswith('oci-archive:') or ':sha-' in ref)):\n"
+        "        raise SystemExit(1)\n"
         "    if ref.startswith('oci-archive:') or ':sha-' in ref:\n"
         "        if os.environ.get('FAKE_IMMUTABLE_COLLISION') == '1' and ':sha-' in ref:\n"
         "            print(previous)\n"
@@ -52,6 +55,8 @@ def _fake_docker(tmp_path: Path) -> Path:
         "        print(previous)\n"
         "    raise SystemExit(0)\n"
         "if 'copy' in args:\n"
+        "    if os.environ.get('FAKE_COPY_FAILURE_COMPONENT') == component:\n"
+        "        raise SystemExit(1)\n"
         "    source_ref = args[-2]\n"
         "    copied_digest = source_ref.rsplit('@', 1)[1] if '@sha256:' in source_ref else source\n"
         "    state[args[-1]] = copied_digest\n"
@@ -93,7 +98,15 @@ def _fake_curl(tmp_path: Path) -> Path:
         "attempt = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "counter.write_text(str(attempt))\n"
         f"source_sha = {COMMIT!r} if attempt > 1 else {'b' * 40!r}\n"
-        "output.write_text(json.dumps({'status': 'ready', 'source_sha': source_sha}))\n",
+        "output.write_text(json.dumps({\n"
+        "    'status': 'ready', 'source_sha': source_sha,\n"
+        "    'worker': {\n"
+        "        'status': 'ready', 'source_sha': source_sha,\n"
+        "        'python_execution_image': 'greenline-python@' + os.environ.get(\n"
+        "            'FAKE_WORKER_PYTHON_DIGEST', os.environ['EXPECTED_PYTHON_EXECUTION_DIGEST']),\n"
+        "        'node_execution_image': 'greenline-node@' + os.environ['EXPECTED_NODE_EXECUTION_DIGEST'],\n"
+        "    },\n"
+        "}))\n",
         encoding="utf-8",
     )
     executable.chmod(0o755)
@@ -196,6 +209,107 @@ def test_environment_tag_moves_to_exact_selected_release_digests(
         assert promoted == _digest(component)
 
 
+def test_promotion_preflights_every_source_before_moving_any_tag(
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "changes.tsv"
+    environment = {
+        **_environment(tmp_path),
+        "TARGET_TAG": "production",
+        "OPERATION": "promote",
+        "RECORD_FILE": str(record),
+        "FAKE_SOURCE_INSPECT_FAILURE_COMPONENT": "node-execution",
+    }
+
+    result = subprocess.run(
+        ["sh", str(SCRIPTS / "promote_images.sh")],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert not Path(environment["FAKE_REGISTRY_STATE"]).exists()
+
+
+def test_failed_promotion_preserves_complete_record_for_partial_rollback(
+    tmp_path: Path,
+) -> None:
+    promotion_record = tmp_path / "promotion.tsv"
+    environment = {
+        **_environment(tmp_path),
+        "TARGET_TAG": "production",
+        "OPERATION": "promote",
+        "RECORD_FILE": str(promotion_record),
+        "FAKE_COPY_FAILURE_COMPONENT": "execution-worker",
+    }
+
+    result = subprocess.run(
+        ["sh", str(SCRIPTS / "promote_images.sh")],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    changes = [line.split("\t") for line in promotion_record.read_text().splitlines()]
+    assert changes == [
+        [component, _digest(component, "previous"), _digest(component)]
+        for component in (
+            "control-plane",
+            "execution-worker",
+            "python-execution",
+            "node-execution",
+        )
+    ]
+
+    rollback_record = tmp_path / "rollback.tsv"
+    subprocess.run(
+        ["sh", str(SCRIPTS / "restore_images.sh")],
+        env={
+            **environment,
+            "PROMOTION_RECORD": str(promotion_record),
+            "ROLLBACK_RECORD": str(rollback_record),
+            "FAKE_COPY_FAILURE_COMPONENT": "",
+        },
+        check=True,
+    )
+
+    registry = json.loads(Path(environment["FAKE_REGISTRY_STATE"]).read_text())
+    assert registry[
+        "docker://ghcr.io/acme/greenline-control-plane:production"
+    ] == _digest("control-plane", "previous")
+
+
+def test_promotion_refuses_to_overwrite_existing_recovery_evidence(
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "changes.tsv"
+    original_evidence = "original recovery evidence\n"
+    record.write_text(original_evidence, encoding="utf-8")
+    environment = {
+        **_environment(tmp_path),
+        "TARGET_TAG": "production",
+        "OPERATION": "promote",
+        "RECORD_FILE": str(record),
+    }
+
+    result = subprocess.run(
+        ["sh", str(SCRIPTS / "promote_images.sh")],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "already contains promotion evidence" in result.stderr
+    assert record.read_text(encoding="utf-8") == original_evidence
+    assert not Path(environment["FAKE_REGISTRY_STATE"]).exists()
+
+
 def test_release_waits_for_the_exact_ready_commit(tmp_path: Path) -> None:
     curl = _fake_curl(tmp_path)
     result = subprocess.run(
@@ -206,6 +320,8 @@ def test_release_waits_for_the_exact_ready_commit(tmp_path: Path) -> None:
             "FAKE_CURL_COUNTER": str(tmp_path / "curl-attempts"),
             "RELEASE_HEALTH_URL": "http://127.0.0.1:8080/health/release",
             "EXPECTED_SOURCE_SHA": COMMIT,
+            "EXPECTED_PYTHON_EXECUTION_DIGEST": _digest("python-execution"),
+            "EXPECTED_NODE_EXECUTION_DIGEST": _digest("node-execution"),
             "ROLLOUT_ATTEMPTS": "2",
             "ROLLOUT_INTERVAL_SECONDS": "0",
         },
@@ -216,6 +332,31 @@ def test_release_waits_for_the_exact_ready_commit(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert f"release {COMMIT} is ready" in result.stdout
+
+
+def test_release_rejects_a_worker_with_the_wrong_execution_image(tmp_path: Path) -> None:
+    curl = _fake_curl(tmp_path)
+    result = subprocess.run(
+        ["sh", str(SCRIPTS / "wait_for_release.sh")],
+        env={
+            **os.environ,
+            "PATH": f"{curl.parent}{os.pathsep}{os.environ['PATH']}",
+            "FAKE_CURL_COUNTER": str(tmp_path / "curl-attempts"),
+            "FAKE_WORKER_PYTHON_DIGEST": "sha256:" + "f" * 64,
+            "RELEASE_HEALTH_URL": "http://127.0.0.1:8080/health/release",
+            "EXPECTED_SOURCE_SHA": COMMIT,
+            "EXPECTED_PYTHON_EXECUTION_DIGEST": _digest("python-execution"),
+            "EXPECTED_NODE_EXECUTION_DIGEST": _digest("node-execution"),
+            "ROLLOUT_ATTEMPTS": "2",
+            "ROLLOUT_INTERVAL_SECONDS": "0",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert f"release {COMMIT} did not become ready" in result.stderr
 
 
 def test_automatic_rollback_restores_all_previous_digests(tmp_path: Path) -> None:

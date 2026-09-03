@@ -110,6 +110,8 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify exact release rollout or restore previous digests
+        id: rollout
+        if: always()
         env:
           AUTH_FILE: ${{ runner.temp }}/greenline-registry-auth/config.json
           EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
@@ -118,6 +120,37 @@ jobs:
           ROLLBACK_RECORD: ${{ runner.temp }}/greenline-promotion/automatic-rollback.tsv
           TARGET_TAG: ${{ inputs.target }}
         run: |
+          mkdir -p "$RUNNER_TEMP/greenline-promotion"
+          if [ "${{ steps.promotion.outcome }}" != "success" ]; then
+            rollback_status=no_changes
+            if [ -s "$PROMOTION_RECORD" ]; then
+              REGISTRY_ROOT=$(printf '%s' "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+              export REGISTRY_ROOT
+              rollback_status=restored
+              if ! sh greenline/scripts/restore_images.sh; then
+                rollback_status=failed
+              fi
+            fi
+            jq -n \
+              --arg status promotion_failed \
+              --arg source_sha "$EXPECTED_SOURCE_SHA" \
+              --arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg rollback_status "$rollback_status" \
+              '{schema_version: 1, status: $status, source_sha: $source_sha,
+                checked_at: $checked_at, automatic_rollback: ($rollback_status != "no_changes"),
+                automatic_rollback_status: $rollback_status}' \
+              > "$RUNNER_TEMP/greenline-promotion/rollout-record.json"
+            jq . "$RUNNER_TEMP/greenline-promotion/rollout-record.json" \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "Promotion failed; automatic rollback status: $rollback_status" >&2
+            exit 1
+          fi
+
+          EXPECTED_PYTHON_EXECUTION_DIGEST=$(awk -F '\t' \
+            '$1 == "python-execution" {print $3}' "$PROMOTION_RECORD")
+          EXPECTED_NODE_EXECUTION_DIGEST=$(awk -F '\t' \
+            '$1 == "node-execution" {print $3}' "$PROMOTION_RECORD")
+          export EXPECTED_PYTHON_EXECUTION_DIGEST EXPECTED_NODE_EXECUTION_DIGEST
           if sh greenline/scripts/wait_for_release.sh; then
             jq -n \
               --arg status healthy \
@@ -150,13 +183,13 @@ jobs:
           exit 1
 
       - name: Attest promotion and rollout records
-        if: always() && steps.promotion.outcome == 'success'
+        if: always()
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: ${{ runner.temp }}/greenline-promotion/*.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: always() && steps.promotion.outcome == 'success'
+        if: always()
         with:
           name: greenline-${{ inputs.operation }}-${{ inputs.target }}-${{ github.run_id }}
           path: |

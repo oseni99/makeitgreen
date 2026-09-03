@@ -12,6 +12,7 @@ import signal
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
+from uuid import uuid4
 
 import abuse_controls
 import learner_state
@@ -46,6 +47,7 @@ class WorkerRuntime:
     run_jobs: run_coordination.PostgresRunJobAdapter
     workers: int
     security_events: operations.SecurityEventSink
+    release_sha: str
 
     def close(self) -> None:
         self.run_jobs.close()
@@ -255,7 +257,27 @@ def compose_worker(
             state.close()
         raise WorkerConfigurationError(violations)
     assert execution is not None and state is not None and jobs is not None
-    return WorkerRuntime(execution, state, jobs, workers, security_events)
+    return WorkerRuntime(execution, state, jobs, workers, security_events, release_sha)
+
+
+def _report_release_until_stopped(
+    runtime: WorkerRuntime,
+    worker_id: str,
+    stop: threading.Event,
+) -> None:
+    """Refresh readiness only after the complete execution runtime is rechecked."""
+    while not stop.is_set():
+        try:
+            runtime.execution.check_ready()
+            runtime.run_jobs.report_worker_release(
+                worker_id,
+                runtime.release_sha,
+                runtime.execution.policy.python_image,
+                runtime.execution.policy.node_image,
+            )
+        except (runner.ExecutionUnavailable, run_coordination.RunJobsUnavailable):
+            pass
+        stop.wait(run_coordination.WORKER_RELEASE_MAX_AGE_SECONDS / 3)
 
 
 def main() -> None:
@@ -274,13 +296,22 @@ def main() -> None:
         runtime.execution,
         workers=runtime.workers,
     )
+    release_thread = threading.Thread(
+        target=_report_release_until_stopped,
+        args=(runtime, f"worker-{uuid4().hex}", stop),
+        name="worker-release-heartbeat",
+        daemon=True,
+    )
     try:
+        release_thread.start()
         worker.start()
         runtime.security_events.emit(
             "worker.started", fields={"concurrency": runtime.workers}
         )
         stop.wait()
     finally:
+        stop.set()
+        release_thread.join(timeout=1)
         worker.stop(join_timeout=75)
         runtime.close()
         runtime.security_events.emit("worker.stopped")

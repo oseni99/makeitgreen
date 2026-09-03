@@ -22,8 +22,22 @@ def _hosted_environment(**values: str) -> dict[str, str]:
 
 
 class _ReadyCursor:
+    def __init__(self, query: str) -> None:
+        self.query = query
+
     def fetchone(self) -> dict[str, int]:
-        return {"version": 3}
+        return {"version": 4}
+
+    def fetchall(self) -> list[dict[str, str]]:
+        if "FROM worker_releases" not in self.query:
+            return []
+        return [
+            {
+                "source_sha": "a" * 40,
+                "python_execution_image": "greenline-python@sha256:" + "b" * 64,
+                "node_execution_image": "greenline-node@sha256:" + "c" * 64,
+            }
+        ]
 
 
 class _ReadyConnection:
@@ -33,8 +47,8 @@ class _ReadyConnection:
     def __exit__(self, *_args) -> None:
         return None
 
-    def execute(self, _query: str) -> _ReadyCursor:
-        return _ReadyCursor()
+    def execute(self, query: str, *_args) -> _ReadyCursor:
+        return _ReadyCursor(query)
 
 
 class _ReadyPool:
@@ -175,7 +189,56 @@ def test_hosted_mode_composes_when_every_safety_adapter_is_ready() -> None:
         assert client.get("/health/release").json() == {
             "status": "ready",
             "source_sha": "a" * 40,
+            "worker": {
+                "status": "ready",
+                "live_workers": 1,
+                "matching_workers": 1,
+                "source_sha": "a" * 40,
+                "python_execution_image": "greenline-python@sha256:" + "b" * 64,
+                "node_execution_image": "greenline-node@sha256:" + "c" * 64,
+            },
         }
+
+
+class _NoWorkerCursor(_ReadyCursor):
+    def fetchall(self) -> list[dict[str, str]]:
+        return []
+
+
+class _NoWorkerConnection(_ReadyConnection):
+    def execute(self, query: str, *_args) -> _ReadyCursor:
+        return _NoWorkerCursor(query)
+
+
+class _NoWorkerPool(_ReadyPool):
+    def connection(self, **_kwargs) -> _ReadyConnection:
+        return _NoWorkerConnection()
+
+
+def test_hosted_release_is_not_ready_without_a_live_worker_attestation() -> None:
+    application = create_application(
+        _hosted_environment(
+            CLERK_SECRET_KEY="sk_test_example",
+            CLERK_AUTHORIZED_PARTIES="https://app.example.com",
+        ),
+        hosted_adapters=HostedAdapters(
+            learner_state=PostgresLearnerStateAdapter(pool=_NoWorkerPool()),
+            run_jobs=PostgresRunJobAdapter(pool=_NoWorkerPool()),
+            abuse_controls=PostgresAbuseControlAdapter(pool=_NoWorkerPool()),
+        ),
+    )
+
+    with TestClient(application) as client:
+        response = client.get("/health/release")
+    assert response.status_code == 503
+    assert response.json()["worker"] == {
+        "status": "not_ready",
+        "live_workers": 0,
+        "matching_workers": 0,
+        "source_sha": "a" * 40,
+        "python_execution_image": None,
+        "node_execution_image": None,
+    }
 
 
 def test_hosted_mode_requires_an_immutable_release_identity() -> None:

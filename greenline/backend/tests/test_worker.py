@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,8 @@ import runner
 from worker import (
     WorkerAdapters,
     WorkerConfigurationError,
+    WorkerRuntime,
+    _report_release_until_stopped,
     compose_worker,
 )
 
@@ -19,7 +23,7 @@ IMAGE_DIGEST = "sha256:" + "a" * 64
 
 class _ReadyCursor:
     def fetchone(self) -> dict[str, int]:
-        return {"version": 3}
+        return {"version": 4}
 
 
 class _ReadyConnection:
@@ -126,6 +130,46 @@ def test_worker_refuses_an_unavailable_execution_runtime(tmp_path: Path) -> None
         )
 
     assert "isolated_execution_unavailable" in _codes(raised.value)
+
+
+def test_worker_reports_release_only_after_execution_readiness_check() -> None:
+    stop = threading.Event()
+    calls: list[tuple[object, ...]] = []
+
+    class _Execution:
+        policy = SimpleNamespace(
+            python_image=f"greenline-python@{IMAGE_DIGEST}",
+            node_image=f"greenline-node@{IMAGE_DIGEST}",
+        )
+
+        def check_ready(self) -> None:
+            calls.append(("checked",))
+            stop.set()
+
+    class _Jobs:
+        def report_worker_release(self, *args) -> None:
+            calls.append(args)
+
+    runtime = WorkerRuntime(
+        execution=_Execution(),  # type: ignore[arg-type]
+        learner_state=object(),  # type: ignore[arg-type]
+        run_jobs=_Jobs(),  # type: ignore[arg-type]
+        workers=1,
+        security_events=object(),  # type: ignore[arg-type]
+        release_sha="a" * 40,
+    )
+
+    _report_release_until_stopped(runtime, "worker-1", stop)
+
+    assert calls == [
+        ("checked",),
+        (
+            "worker-1",
+            "a" * 40,
+            f"greenline-python@{IMAGE_DIGEST}",
+            f"greenline-node@{IMAGE_DIGEST}",
+        ),
+    ]
 
 
 @pytest.mark.parametrize("concurrency", ["0", "33", "many"])

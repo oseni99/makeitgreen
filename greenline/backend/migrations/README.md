@@ -13,6 +13,8 @@ psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/002_run_coordination.sql
 psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/003_abuse_controls.sql
+psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
+  --file backend/migrations/004_worker_releases.sql
 ```
 
 `PostgresLearnerStateAdapter.check_ready()` verifies the exact schema version
@@ -27,3 +29,7 @@ authoritative in-memory job state.
 Migration 003 adds fixed one-minute request-budget windows and durable audit
 events. Audit rows default to 30-day retention and are pruned incrementally by
 request admission; set the retention explicitly for your operational policy.
+
+Migration 004 adds short-lived worker release attestations. Workers refresh
+their row only after rechecking Docker and both configured execution images;
+the control plane uses the rows for listener-free exact-release readiness.

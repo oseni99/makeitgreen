@@ -128,6 +128,34 @@ def _adapter(
     )
 
 
+def test_hosted_run_bundle_is_readable_by_a_distinct_container_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _challenge(tmp_path, monkeypatch)
+    repo = tmp_path / "challenges" / "container-contract" / "repo"
+    (repo / "answer.txt").chmod(0o600)
+    (repo / "tests" / "test_answer.py").chmod(0o600)
+    (repo / "tests").chmod(0o700)
+    repo.chmod(0o700)
+    bundle_root = tmp_path / "shared-run-bundles"
+    bundle_root.mkdir()
+
+    with runner._materialized_workspace(
+        runner.ChallengeRun(
+            "container-contract",
+            user_id="user-a",
+            workspace={"answer.txt": "green\n"},
+        ),
+        directory=str(bundle_root),
+    ) as workspace:
+        paths = [workspace, *workspace.rglob("*")]
+        assert all(
+            (path.stat().st_mode & (0o5 if path.is_dir() else 0o4))
+            == (0o5 if path.is_dir() else 0o4)
+            for path in paths
+        )
+
+
 def test_container_readiness_requires_daemon_and_both_pinned_images(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

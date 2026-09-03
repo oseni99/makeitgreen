@@ -87,9 +87,11 @@ per-learner active-run capacity. Oversized bodies are rejected before parsing.
 Worker startup verifies the Docker daemon and both immutable execution images.
 The API's `/health/ready` checks its PostgreSQL dependencies only, so execution
 capacity loss cannot remove the control plane used to observe queued jobs.
-`/health/release` applies the same readiness checks and reports the immutable
-build commit, allowing promotion automation to reject a still-healthy old
-revision.
+`/health/release` applies the same readiness checks and also requires every
+fresh worker heartbeat to report the same immutable build commit and execution
+image refs. Workers refresh that PostgreSQL heartbeat only after rechecking the
+Docker daemon and both images, so promotion automation rejects stale control,
+worker, or execution components without exposing a worker HTTP listener.
 
 ### Production control-plane image
 

@@ -342,6 +342,14 @@ def _runtime(slug: str, src: Path, tmpdir: Path, report_path: Path) -> tuple[lis
     )
 
 
+def _make_run_bundle_readable(path: Path) -> None:
+    """Grant the separate execution UID read/traverse access to a staged bundle."""
+    paths = [path, *path.rglob("*")]
+    for candidate in paths:
+        required = 0o5 if candidate.is_dir() else 0o4
+        candidate.chmod(candidate.stat().st_mode | required)
+
+
 @contextmanager
 def _materialized_workspace(
     run: ChallengeRun, *, directory: str | None = None
@@ -385,6 +393,8 @@ def _materialized_workspace(
             )
             persisted = any(path.is_file() for path in ws.rglob("*"))
             if not persisted:
+                if directory is not None:
+                    _make_run_bundle_readable(tmpdir)
                 yield tmpdir
                 return
             overlays = (
@@ -396,6 +406,10 @@ def _materialized_workspace(
                 dest = tmpdir / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(edited, dest)
+        if directory is not None:
+            # Hosted execution runs under a different numeric UID than the
+            # worker that stages this read-only bind mount.
+            _make_run_bundle_readable(tmpdir)
         yield tmpdir
 
 

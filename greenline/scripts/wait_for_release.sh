@@ -3,6 +3,8 @@ set -eu
 
 : "${RELEASE_HEALTH_URL:?RELEASE_HEALTH_URL is required}"
 : "${EXPECTED_SOURCE_SHA:?EXPECTED_SOURCE_SHA is required}"
+: "${EXPECTED_PYTHON_EXECUTION_DIGEST:?EXPECTED_PYTHON_EXECUTION_DIGEST is required}"
+: "${EXPECTED_NODE_EXECUTION_DIGEST:?EXPECTED_NODE_EXECUTION_DIGEST is required}"
 
 case "$RELEASE_HEALTH_URL" in
     https://*|http://127.0.0.1:*|http://localhost:*) ;;
@@ -16,6 +18,15 @@ if [ "${#EXPECTED_SOURCE_SHA}" -ne 40 ] || \
     echo "EXPECTED_SOURCE_SHA must be a full lowercase commit SHA" >&2
     exit 1
 fi
+for digest in "$EXPECTED_PYTHON_EXECUTION_DIGEST" "$EXPECTED_NODE_EXECUTION_DIGEST"
+do
+    hex=${digest#sha256:}
+    if [ "$hex" = "$digest" ] || [ "${#hex}" -ne 64 ] || \
+        printf '%s' "$hex" | grep -q '[^0-9a-f]'; then
+        echo "expected execution image digests must be lowercase sha256 digests" >&2
+        exit 1
+    fi
+done
 
 attempts=${ROLLOUT_ATTEMPTS:-30}
 interval=${ROLLOUT_INTERVAL_SECONDS:-10}
@@ -40,7 +51,14 @@ while [ "$attempt" -le "$attempts" ]; do
         --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors \
         --output "$response" "$RELEASE_HEALTH_URL" && \
         jq -e --arg expected "$EXPECTED_SOURCE_SHA" \
-            '.status == "ready" and .source_sha == $expected' \
+            --arg python_digest "$EXPECTED_PYTHON_EXECUTION_DIGEST" \
+            --arg node_digest "$EXPECTED_NODE_EXECUTION_DIGEST" \
+            '.status == "ready" and .source_sha == $expected and
+             .worker.status == "ready" and .worker.source_sha == $expected and
+             (.worker.python_execution_image | type == "string" and
+                endswith("@" + $python_digest)) and
+             (.worker.node_execution_image | type == "string" and
+                endswith("@" + $node_digest))' \
             "$response" >/dev/null; then
         echo "release $EXPECTED_SOURCE_SHA is ready"
         exit 0

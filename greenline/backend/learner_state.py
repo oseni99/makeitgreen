@@ -12,7 +12,7 @@ import challenges
 import progress
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class LearnerStateUnavailable(RuntimeError):

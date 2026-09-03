@@ -147,8 +147,45 @@ while :; do
     sleep 1
 done
 
+attempt=0
+until curl --fail --silent --show-error \
+    http://127.0.0.1:18080/health/release | jq --exit-status \
+    '.status == "ready" and .worker.status == "ready" and
+     .worker.matching_workers == .worker.live_workers and
+     .worker.live_workers > 0' >/dev/null; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 15 ]; then
+        docker logs "$worker_name"
+        exit 1
+    fi
+    sleep 1
+done
+
 docker exec "$worker_name" python -c \
     "import importlib.util; assert importlib.util.find_spec('fastapi') is None; assert importlib.util.find_spec('clerk_backend_api') is None"
+
+# Exercise the complete cross-UID path: the worker (65532) stages a real Run
+# Bundle and the execution container (65534) copies and tests it.
+docker exec "$worker_name" python -c '
+import os
+from pathlib import Path
+
+import runner
+import worker
+
+source = Path(
+    "/app/challenges/config-merge/repo/config_service/merge.py"
+).read_text()
+result = worker._container_adapter(os.environ).execute(
+    runner.ChallengeRun(
+        "config-merge",
+        workspace={
+            "config_service/merge.py": source.replace("elif value:", "else:")
+        },
+    )
+)
+assert result["green"], result
+'
 
 docker stop --time 75 "$worker_name" >/dev/null
 docker stop --time 10 "$control_name" >/dev/null

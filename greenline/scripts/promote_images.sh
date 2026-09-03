@@ -59,7 +59,19 @@ case "$RECORD_FILE" in
         ;;
 esac
 
-: > "$RECORD_FILE"
+# The record is recovery evidence. Never replace evidence from an earlier partial
+# attempt: doing so would record an already-promoted digest as the rollback target.
+if [ -s "$RECORD_FILE" ]; then
+    echo "RECORD_FILE already contains promotion evidence" >&2
+    exit 1
+fi
+
+record_temp="${RECORD_FILE}.tmp.$$"
+trap 'rm -f "$record_temp"' EXIT HUP INT TERM
+: > "$record_temp"
+
+# Resolve and validate the complete change set before moving the first mutable
+# environment tag. A copy failure can then be recovered using the complete record.
 for component in control-plane execution-worker python-execution node-execution
 do
     repository="$REGISTRY_ROOT-$component"
@@ -76,14 +88,43 @@ do
         exit 1
     fi
 
-    previous_digest=none
-    if inspected=$(docker run --rm \
+    if previous_digest=$(docker run --rm \
         --mount "type=bind,src=$AUTH_FILE,dst=/auth/config.json,readonly" \
         "$SKOPEO_IMAGE" inspect --authfile /auth/config.json \
         --format '{{.Digest}}' "docker://$target" 2>/dev/null); then
-        previous_digest=$inspected
+        previous_hex=${previous_digest#sha256:}
+        if [ "$previous_hex" = "$previous_digest" ] || \
+            [ "${#previous_hex}" -ne 64 ] || \
+            printf '%s' "$previous_hex" | grep -q '[^0-9a-f]'; then
+            echo "previous digest is invalid for $component" >&2
+            exit 1
+        fi
+    else
+        echo "target tag has no rollback digest for $component" >&2
+        exit 1
     fi
 
+    printf '%s\t%s\t%s\n' \
+        "$component" "$previous_digest" "$source_digest" >> "$record_temp"
+done
+
+mv "$record_temp" "$RECORD_FILE"
+trap - EXIT HUP INT TERM
+
+tab=$(printf '\t')
+line_number=1
+for component in control-plane execution-worker python-execution node-execution
+do
+    line=$(sed -n "${line_number}p" "$RECORD_FILE")
+    IFS="$tab" read -r recorded_component previous_digest source_digest <<EOF
+$line
+EOF
+    if [ "$recorded_component" != "$component" ]; then
+        echo "promotion record changed after preflight" >&2
+        exit 1
+    fi
+    repository="$REGISTRY_ROOT-$component"
+    target="$repository:$TARGET_TAG"
     docker run --rm \
         --mount "type=bind,src=$AUTH_FILE,dst=/auth/config.json,readonly" \
         "$SKOPEO_IMAGE" copy --all --preserve-digests --retry-times 3 \
@@ -98,5 +139,5 @@ do
         echo "promotion changed the digest for $component" >&2
         exit 1
     fi
-    printf '%s\t%s\t%s\n' "$component" "$previous_digest" "$promoted_digest" >> "$RECORD_FILE"
+    line_number=$((line_number + 1))
 done

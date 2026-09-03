@@ -70,15 +70,21 @@ artifact for 90 days. The immutable release manifest is attested as well.
 The deployment platform must consume the four `promoted_digest` values from
 that record or watch the corresponding environment tags. Configure
 `GREENLINE_PYTHON_EXECUTION_IMAGE` and
-`GREENLINE_NODE_EXECUTION_IMAGE` with their exact digest references, never the
-mutable environment tags. Every hosted control-plane instance must receive the
-image's baked-in `GREENLINE_RELEASE_SHA`; the official image sets it from the
-full commit SHA at build time.
+`GREENLINE_NODE_EXECUTION_IMAGE` on every worker with their exact digest
+references, never the mutable environment tags. Every hosted control-plane and
+worker instance must receive the image's baked-in `GREENLINE_RELEASE_SHA`; the
+official images set it from the full commit SHA at build time.
 
 After moving the tags, the workflow polls `GREENLINE_RELEASE_HEALTH_URL`.
 `/health/release` returns HTTP 200 only when the normal control-plane
-dependencies are ready, and its `source_sha` must exactly match the selected
-release. A generic healthy response from an old deployment does not pass.
+dependencies are ready and every fresh worker heartbeat reports that same
+source SHA and one consistent pair of execution-image refs. Workers publish a
+heartbeat only after rechecking Docker and both pinned images. The rollout
+script must receive `EXPECTED_PYTHON_EXECUTION_DIGEST` and
+`EXPECTED_NODE_EXECUTION_DIGEST` from the corresponding `promoted_digest`
+entries in the promotion record; it compares them to the reported refs. A
+generic healthy response, a mixed worker rollout, or stale execution-image
+configuration does not pass.
 
 ## Rollback
 
@@ -88,9 +94,10 @@ environment, and `operation: rollback`. Rollback moves all four environment tags
 as one approved workflow run and records both the displaced and restored
 digests. It never rebuilds an older commit.
 
-If the workflow stops after only some tags move, rerun the same approved
-operation. Each component is digest-verified and the operation is idempotent.
-Do not repair a partial release by overwriting an immutable `sha-*` tag.
+Before moving its first tag, the workflow resolves all four source and prior
+target digests and persists the complete recovery set. If any subsequent copy
+fails, the always-running recovery step restores every tag that moved. Do not
+repair a partial release by overwriting an immutable `sha-*` tag.
 
 If exact-version readiness times out, the workflow restores all four previous
 digests and fails the run. Restoration preflights the complete recovery set,
@@ -98,10 +105,10 @@ rejects unrelated concurrent tag changes, verifies every restored digest, and
 is safe to rerun after a partial restoration. The rollout result and rollback
 TSV are retained with the attested promotion evidence.
 
-The first promotion to a new environment has no prior release to restore. Its
-failed rollout is reported as an automatic-rollback failure without deleting
-registry manifests. Bootstrap a new environment before accepting traffic, then
-confirm one known-good release so every later promotion has a recovery set.
+The promotion workflow refuses to move any tag when an environment lacks a
+complete prior release, because such a change cannot be rolled back safely.
+Bootstrap all four tags as one deliberate, protected operation before accepting
+traffic; every workflow-driven promotion thereafter requires that recovery set.
 
 Registry promotion cannot force an unspecified hosting platform to restart.
 The platform's tag watcher or deployment controller remains a required
