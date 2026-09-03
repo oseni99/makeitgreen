@@ -1,3 +1,5 @@
+from threading import Barrier, Event, Lock, Thread
+
 from lease_service.store import LeaseStore
 
 
@@ -51,3 +53,39 @@ def test_stale_owner_cannot_renew_or_release_new_generation() -> None:
     assert store.renew(old) is None
     assert store.release(old) is False
     assert store.renew(current) is not None
+
+
+def test_only_one_worker_acquires_an_available_lease() -> None:
+    ready = Barrier(2)
+    both_started = Event()
+    started_lock = Lock()
+    started = 0
+
+    def coordinated_now() -> float:
+        both_started.wait()
+        return 100.0
+
+    store = LeaseStore(coordinated_now, ttl=10)
+    acquired = []
+
+    def acquire(owner: str) -> None:
+        nonlocal started
+        ready.wait()
+        with started_lock:
+            started += 1
+            if started == 2:
+                both_started.set()
+        acquired.append(store.acquire(owner))
+
+    workers = [
+        Thread(target=acquire, args=(owner,))
+        for owner in ("worker-a", "worker-b")
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+
+    leases = [lease for lease in acquired if lease is not None]
+    assert len(leases) == 1
+    assert leases[0].generation == 1

@@ -4,10 +4,13 @@ Renew and release checked only the owner name. Once an expired lease was
 reacquired, the old worker still looked like a valid owner and could extend or
 delete the new worker's lease.
 
-Fence every mutation with the lease generation as well as the owner. The
-generation increments on each acquisition, so a stale lease object can never
-mutate a later generation.
+Fence every mutation with the lease generation as well as the owner, and make
+the check-and-mutate section atomic. The generation increments on each
+acquisition, so a stale lease object can never mutate a later generation, while
+the lock ensures two workers cannot both claim the same available lease.
 
 This is the same principle used by fenced database leases and distributed job
 workers: expiry chooses a new owner, but the generation prevents delayed work
-from acting as if it still owns the resource.
+from acting as if it still owns the resource. In a distributed implementation,
+the same atomic transition belongs in a database compare-and-swap or transaction
+rather than a process-local lock.
