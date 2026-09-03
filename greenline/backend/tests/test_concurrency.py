@@ -7,10 +7,12 @@ import pytest
 
 import app as api
 import challenge_locks
+from execution_fakes import FunctionExecutionAdapter
+from learner_state import WorkspaceSnapshot
 
 
 def _record_run(operations: list[str]):
-    def _mock(slug: str, **_kwargs) -> dict:
+    def _mock(slug: str, _user_id: str | None, **_kwargs) -> dict:
         operations.append("record_run")
         return {"id": 1, "slug": slug}
 
@@ -32,15 +34,25 @@ def test_reset_waits_for_in_flight_run_and_is_the_final_operation(monkeypatch) -
         return {"green": True, "passed": 1, "failed": 0, "errors": 0, "skipped": 0,
                 "exit_code": 0, "output": "", "tests": []}
 
-    monkeypatch.setattr(api.runner, "run_tests", blocked_run)
-    monkeypatch.setattr(api.progress, "record_run", _record_run(operations))
     monkeypatch.setattr(
-        api.ch,
-        "reset_workspace",
-        lambda slug: operations.append("reset_workspace"),
+        api,
+        "execution_adapter",
+        FunctionExecutionAdapter(
+            lambda run, _on_output: blocked_run(run.slug)
+        ),
     )
     monkeypatch.setattr(
-        api.progress, "reset", lambda slug: operations.append("reset_progress")
+        api.learner_state_adapter,
+        "snapshot",
+        lambda slug, user_id: WorkspaceSnapshot(0, {}),
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter, "record_run", _record_run(operations)
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter,
+        "reset",
+        lambda slug, user_id: operations.append("reset_state"),
     )
 
     def request_reset() -> dict:
@@ -62,7 +74,7 @@ def test_reset_waits_for_in_flight_run_and_is_the_final_operation(monkeypatch) -
         assert "run" in run_result
         assert reset_future.result(timeout=1) == {"ok": True}
 
-    assert operations == ["run", "record_run", "reset_workspace", "reset_progress"]
+    assert operations == ["run", "record_run", "reset_state"]
     assert challenge_locks._entries == {}
 
 
@@ -81,12 +93,25 @@ def test_save_waits_for_in_flight_run(monkeypatch) -> None:
         return {"green": False, "passed": 0, "failed": 1, "errors": 0, "skipped": 0,
                 "exit_code": 1, "output": "", "tests": []}
 
-    monkeypatch.setattr(api.runner, "run_tests", blocked_run)
-    monkeypatch.setattr(api.progress, "record_run", _record_run(operations))
     monkeypatch.setattr(
-        api.ch,
+        api,
+        "execution_adapter",
+        FunctionExecutionAdapter(
+            lambda run, _on_output: blocked_run(run.slug)
+        ),
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter,
+        "snapshot",
+        lambda slug, user_id: WorkspaceSnapshot(0, {}),
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter, "record_run", _record_run(operations)
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter,
         "write_file",
-        lambda slug, path, content: operations.append("write_file"),
+        lambda slug, path, content, user_id: operations.append("write_file"),
     )
 
     def request_save() -> dict:
@@ -125,14 +150,28 @@ def test_different_challenges_do_not_block_each_other(monkeypatch) -> None:
         return {"green": False, "passed": 0, "failed": 1, "errors": 0, "skipped": 0,
                 "exit_code": 1, "output": "", "tests": []}
 
-    monkeypatch.setattr(api.runner, "run_tests", blocked_run)
-    monkeypatch.setattr(api.progress, "record_run", lambda slug, **_k: {"id": 1})
     monkeypatch.setattr(
-        api.ch,
-        "reset_workspace",
-        lambda slug: operations.append(f"reset:{slug}"),
+        api,
+        "execution_adapter",
+        FunctionExecutionAdapter(
+            lambda run, _on_output: blocked_run(run.slug)
+        ),
     )
-    monkeypatch.setattr(api.progress, "reset", lambda slug: None)
+    monkeypatch.setattr(
+        api.learner_state_adapter,
+        "snapshot",
+        lambda slug, user_id: WorkspaceSnapshot(0, {}),
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter,
+        "record_run",
+        lambda slug, user_id, **_kwargs: {"id": 1},
+    )
+    monkeypatch.setattr(
+        api.learner_state_adapter,
+        "reset",
+        lambda slug, user_id: operations.append(f"reset:{slug}"),
+    )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         run_future = pool.submit(api.run, "challenge-a")

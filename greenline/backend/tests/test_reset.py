@@ -17,7 +17,11 @@ def isolated_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
 
     monkeypatch.setattr(ch, "CHALLENGES_DIR", challenges_dir)
     monkeypatch.setattr(ch, "WORKSPACES_DIR", workspaces_dir)
-    monkeypatch.setattr(api.progress, "reset", lambda slug: None)
+    monkeypatch.setattr(
+        api.app.state.learner_state_adapter,
+        "reset",
+        lambda slug, user_id: ch.reset_workspace(slug, user_id),
+    )
     return challenges_dir, workspaces_dir
 
 

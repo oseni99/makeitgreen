@@ -26,8 +26,13 @@ def authorized_parties() -> list[str] | None:
     return parties or None
 
 
-def authenticate(request: Request) -> dict[str, Any] | None:
-    secret = _secret_key()
+def authenticate(
+    request: Request,
+    *,
+    secret_key: str | None = None,
+    parties: list[str] | None = None,
+) -> dict[str, Any] | None:
+    secret = secret_key or _secret_key()
     if secret is None:
         return None
 
@@ -38,7 +43,9 @@ def authenticate(request: Request) -> dict[str, Any] | None:
     )
     state = Clerk(bearer_auth=secret).authenticate_request(
         clerk_request,
-        AuthenticateRequestOptions(authorized_parties=authorized_parties()),
+        AuthenticateRequestOptions(
+            authorized_parties=parties if parties is not None else authorized_parties()
+        ),
     )
     if state.status != AuthStatus.SIGNED_IN or state.payload is None:
         return None

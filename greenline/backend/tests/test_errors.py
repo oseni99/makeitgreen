@@ -18,7 +18,11 @@ def isolated_challenges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
     monkeypatch.setattr(ch, "CHALLENGES_DIR", challenges_dir)
     monkeypatch.setattr(ch, "WORKSPACES_DIR", workspaces_dir)
-    monkeypatch.setattr(api.progress, "get_all", lambda: {})
+    monkeypatch.setattr(
+        api.app.state.learner_state_adapter,
+        "get_all",
+        lambda user_id: {},
+    )
     return challenges_dir
 
 

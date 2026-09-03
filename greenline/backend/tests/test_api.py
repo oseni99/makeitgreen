@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import app as api
 import challenges as ch
 import progress
+from execution_fakes import FunctionExecutionAdapter
 
 
 @pytest.fixture
@@ -199,26 +200,30 @@ def test_run_passes_start_time_and_truncation_state_to_history(
     captured: dict = {}
 
     monkeypatch.setattr(
-        api.runner,
-        "run_tests",
-        lambda slug: {
-            "green": False,
-            "exit_code": 1,
-            "output": "tail",
-            "output_truncated": True,
-            "tests": [],
-            "passed": 0,
-            "failed": 1,
-            "errors": 0,
-            "skipped": 0,
-        },
+        api.app.state,
+        "execution_adapter",
+        FunctionExecutionAdapter(
+            lambda _run, _on_output: {
+                "green": False,
+                "exit_code": 1,
+                "output": "tail",
+                "output_truncated": True,
+                "tests": [],
+                "passed": 0,
+                "failed": 1,
+                "errors": 0,
+                "skipped": 0,
+            }
+        ),
     )
 
-    def record_run(slug: str, **kwargs) -> dict:
+    def record_run(slug: str, _user_id: str | None, **kwargs) -> dict:
         captured.update(kwargs)
         return {"id": 1, "slug": slug, "started_at": kwargs["started_at"]}
 
-    monkeypatch.setattr(api.progress, "record_run", record_run)
+    monkeypatch.setattr(
+        api.app.state.learner_state_adapter, "record_run", record_run
+    )
 
     response = TestClient(api.app).post("/api/challenges/demo/run")
 
