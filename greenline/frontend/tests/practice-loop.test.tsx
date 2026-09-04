@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -158,6 +158,13 @@ describe('practice loop', () => {
 
     const editor = await screen.findByRole('textbox', { name: 'code editor' })
     expect((editor as HTMLTextAreaElement).value).toBe('def checkout():\n    return "broken"\n')
+    const challengeDetails = screen.getByRole('group', { name: 'Challenge details' })
+    expect(within(challengeDetails).getByText('Concurrency')).toBeTruthy()
+    expect(within(challengeDetails).getByText('Medium')).toBeTruthy()
+    expect(within(challengeDetails).getByText('○ TODO')).toBeTruthy()
+    expect(within(challengeDetails).getByText('~25 min')).toBeTruthy()
+    expect(within(challengeDetails).getByText('Python')).toBeTruthy()
+    expect(within(challengeDetails).getByText('0 attempts')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: /run tests/i }))
     expect(await screen.findByText('1 failed · 1 passed')).toBeTruthy()

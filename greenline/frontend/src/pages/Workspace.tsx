@@ -20,7 +20,6 @@ import {
   type WorkspaceEditor,
 } from '../editorDiagnostics'
 import { Button } from '@/components/ui/button'
-import { buttonVariants } from '@/components/ui/button-variants'
 import { cn } from '@/lib/utils'
 import {
   clearTimer,
@@ -739,18 +738,22 @@ export default function Workspace() {
 
   return (
     <div className="workspace-shell flex h-svh min-w-0 flex-col overflow-hidden bg-background text-foreground">
-      <header className="workspace-topbar shrink-0 border-b bg-card px-3 py-2.5 md:px-6">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center gap-2">
-          <Link to="/challenges" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'gap-2 px-2.5')}>
+      <header className="workspace-topbar shrink-0 border-b bg-card px-3 py-2 md:px-4">
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Link
+            to="/challenges"
+            className="inline-flex min-h-9 items-center gap-2 rounded-md px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <span aria-hidden="true">←</span>
-            <span className="hidden sm:inline">All challenges</span>
+            <span className="hidden sm:inline">Challenges</span>
           </Link>
-          <span className="hidden text-muted-foreground sm:inline" aria-hidden="true">/</span>
-          <span className="min-w-0 truncate text-sm font-semibold tracking-[-0.01em]">{challenge.title}</span>
-          <span className="hidden font-mono text-[11px] text-muted-foreground md:inline">{slug}</span>
+          <span className="hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+          <span className="hidden text-xs font-semibold tracking-[0.01em] text-muted-foreground sm:inline">
+            Workspace
+          </span>
           <div className="flex-1" />
           <span className="hidden items-center gap-1.5 text-[11px] text-muted-foreground lg:flex">
-            <span className="size-1.5 rounded-full bg-success" aria-hidden="true" /> autosaves on edit
+            <span className="size-1.5 rounded-full bg-success" aria-hidden="true" /> autosaved
           </span>
           {timer && <Timer minutes={challenge.minutes} state={timer} />}
           <Button
@@ -770,7 +773,7 @@ export default function Workspace() {
           {savedFlash && <span className="rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">saved</span>}
           <Link
             to={`/c/${slug}/solution`}
-            className={cn(buttonVariants({ variant: 'utility', size: 'sm' }), 'max-sm:min-h-11')}
+            className="inline-flex min-h-9 items-center justify-center rounded-md border border-border bg-card px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
             onClick={(e) => void handleSolutionNav(e)}
           >
             Solution
@@ -781,14 +784,13 @@ export default function Workspace() {
         </div>
       </header>
 
-      <div className="workspace-context shrink-0 border-b bg-card px-4 py-4 md:px-6 md:py-5">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-end justify-between gap-4">
+      <div className="workspace-context shrink-0 border-b bg-background px-4 py-3 md:px-5 md:py-4">
+        <div className="w-full" role="group" aria-label="Challenge details">
           <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">{challenge.type}</span>
-              <span className="rounded-full border px-2.5 py-1 text-[11px] text-muted-foreground">{challenge.difficulty}</span>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="truncate text-xl font-bold tracking-[-0.025em] md:text-2xl">{challenge.title}</h1>
               <span className={cn(
-                'rounded-full px-2.5 py-1 text-[11px] font-semibold',
+                'rounded-full px-2.5 py-1 text-[10px] font-bold',
                 challenge.progress.status === 'solved' && 'bg-success/10 text-success',
                 challenge.progress.status === 'attempted' && 'bg-warning/10 text-warning',
                 challenge.progress.status === 'todo' && 'bg-muted text-muted-foreground',
@@ -796,13 +798,18 @@ export default function Workspace() {
                 {solved ? '● SOLVED' : challenge.progress.status === 'attempted' ? '◐ ATTEMPTED' : '○ TODO'}
               </span>
             </div>
-            <h1 className="truncate text-xl font-bold tracking-[-0.025em] md:text-2xl">{challenge.title}</h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{challenge.blurb}</p>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="rounded-md border bg-background px-2.5 py-1.5">~{challenge.minutes} min</span>
-            <span className="rounded-md border bg-background px-2.5 py-1.5">{challenge.language}</span>
-            <span className="rounded-md border bg-background px-2.5 py-1.5">{challenge.progress.attempts} {challenge.progress.attempts === 1 ? 'attempt' : 'attempts'}</span>
+            <p className="mt-0.5 max-w-3xl text-sm leading-5 text-muted-foreground">{challenge.blurb}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="font-semibold text-foreground">{challenge.type}</span>
+              <span aria-hidden="true">·</span>
+              <span>{challenge.difficulty}</span>
+              <span aria-hidden="true">·</span>
+              <span>{challenge.language}</span>
+              <span aria-hidden="true">·</span>
+              <span>~{challenge.minutes} min</span>
+              <span aria-hidden="true">·</span>
+              <span>{challenge.progress.attempts} {challenge.progress.attempts === 1 ? 'attempt' : 'attempts'}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -820,7 +827,7 @@ export default function Workspace() {
         </div>
       )}
 
-      <div className="relative grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="relative grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[296px_minmax(0,1fr)]">
         <aside
           className={cn(
             'workspace-sidebar min-h-0 w-full flex-col overflow-hidden border-b bg-card lg:static lg:z-auto lg:flex lg:w-auto lg:border-r lg:border-b-0',
@@ -828,13 +835,13 @@ export default function Workspace() {
           )}
           id="ws-side-panel"
         >
-          <div className="flex shrink-0 gap-1 border-b bg-background p-2" role="group" aria-label="Workspace panel">
+          <div className="grid h-11 shrink-0 grid-cols-3 border-b bg-muted/35 px-2" role="group" aria-label="Workspace panel">
             <button
               type="button"
               aria-pressed={sideTab === 'brief'}
               className={cn(
-                'min-h-11 flex-1 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-9',
-                sideTab === 'brief' && 'bg-muted text-foreground',
+                'border-b-2 border-transparent px-2 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                sideTab === 'brief' && 'border-primary text-foreground',
               )}
               onClick={() => setSideTab('brief')}
             >
@@ -844,8 +851,8 @@ export default function Workspace() {
               type="button"
               aria-pressed={sideTab === 'files'}
               className={cn(
-                'min-h-11 flex-1 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-9',
-                sideTab === 'files' && 'bg-muted text-foreground',
+                'border-b-2 border-transparent px-2 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                sideTab === 'files' && 'border-primary text-foreground',
               )}
               onClick={() => setSideTab('files')}
             >
@@ -855,8 +862,8 @@ export default function Workspace() {
               type="button"
               aria-pressed={sideTab === 'search'}
               className={cn(
-                'min-h-11 flex-1 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-9',
-                sideTab === 'search' && 'bg-muted text-foreground',
+                'border-b-2 border-transparent px-2 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                sideTab === 'search' && 'border-primary text-foreground',
               )}
               onClick={() => setSideTab('search')}
               title="Search in challenge (⌘⇧F)"
@@ -945,8 +952,8 @@ export default function Workspace() {
                     <button
                       type="button"
                       className={cn(
-                        'flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 text-left font-mono text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:min-h-10',
-                        f.path === openPath && 'bg-primary/8 text-foreground',
+                        'flex min-h-11 min-w-0 flex-1 items-center gap-2 border-l-2 border-transparent px-3 text-left font-mono text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:min-h-10',
+                        f.path === openPath && 'border-l-primary bg-primary/8 text-foreground',
                       )}
                       onClick={() => openFile(f.path)}
                     >
@@ -979,7 +986,7 @@ export default function Workspace() {
               <span className="flex items-center px-4 font-mono text-xs text-console-muted">select a file</span>
             ) : (
               openTabs.map((path) => (
-                <div key={path} className={cn('flex shrink-0 items-center border-r border-white/10', path === openPath && 'bg-console-surface')}>
+                <div key={path} className={cn('flex shrink-0 items-center border-r border-t-2 border-t-transparent border-white/10', path === openPath && 'border-t-primary bg-console-surface')}>
                   <button
                     type="button"
                     className={cn(

@@ -5,6 +5,102 @@ import { LoadError } from '../components/LoadError'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+const FOCUS_STORAGE_KEY = 'greenline-prep-focus'
+
+const PREP_TRACKS = [
+  {
+    id: 'foundations',
+    name: 'Backend foundations',
+    description: 'Core backend patterns',
+    cadence: '6–8 sessions',
+    accent: 'bg-sticker-sky',
+    slugs: [
+      'wallet-service',
+      'return-workflow',
+      'config-merge',
+      'log-aggregator',
+      'ledger-api',
+      'token-auth-api',
+      'cache-ext',
+      'runbook-revisions',
+      'notification-dispatch-node',
+      'auth-tenant-leak',
+      'feature-flag-ext',
+    ],
+  },
+  {
+    id: 'distributed',
+    name: 'Distributed correctness',
+    description: 'Races, retries & consistency',
+    cadence: '6–8 sessions',
+    accent: 'bg-sticker-purple',
+    slugs: [
+      'orders-service',
+      'transfer-deadlock',
+      'rate-limiter',
+      'job-lease',
+      'invoice-delivery-worker',
+      'workspace-replica-router',
+      'invoice-cents-migration',
+      'digest-scheduler',
+      'device-command-webhook',
+    ],
+  },
+  {
+    id: 'debugging',
+    name: 'Production debugging',
+    description: 'Incidents, databases & runtimes',
+    cadence: '8–10 sessions',
+    accent: 'bg-sticker-orange',
+    slugs: [
+      'incident-alerts',
+      'queue-drain',
+      'deploy-crash',
+      'device-ingest-incident',
+      'audit-export-pool',
+      'thread-stall',
+      'build-stream-leak',
+      'topk-errors',
+      'enrichment-timeout-incident',
+      'audit-archive-stream',
+      'thumbnail-handoff',
+      'profile-search-projector',
+      'lab-sample-history',
+      'csv-import',
+      'retry-storm',
+      'gc-churn',
+      'cdc-slot',
+    ],
+  },
+  {
+    id: 'senior',
+    name: 'Senior mixed loop',
+    description: 'A realistic mock onsite',
+    cadence: '7 challenges',
+    accent: 'bg-sticker-green',
+    slugs: [
+      'pagination-api',
+      'subscription-renew',
+      'artifact-upload-ext',
+      'outbox-publish',
+      'build-stream-leak',
+      'vendor-catalog-reconcile',
+      'cdc-slot',
+    ],
+  },
+] as const
+
+type FocusId = (typeof PREP_TRACKS)[number]['id']
+
+function storedFocus(): FocusId | '' {
+  try {
+    const value = localStorage.getItem(FOCUS_STORAGE_KEY)
+    return PREP_TRACKS.some((track) => track.id === value) ? (value as FocusId) : ''
+  } catch {
+    return ''
+  }
+}
+
 function statusLabel(status: ChallengeMeta['progress']['status']) {
   if (status === 'solved') return '● SOLVED'
   if (status === 'attempted') return '◐ ATTEMPTED'
@@ -15,6 +111,7 @@ export default function Catalog() {
   const [challenges, setChallenges] = useState<ChallengeMeta[] | null>(null)
   const [error, setError] = useState(false)
   const [filter, setFilter] = useState('All')
+  const [focus, setFocus] = useState<FocusId | ''>(storedFocus)
 
   const load = useCallback((signal?: AbortSignal) => {
     return api
@@ -36,6 +133,28 @@ export default function Catalog() {
     [challenges],
   )
   const shown = (challenges ?? []).filter((c) => filter === 'All' || c.type === filter)
+  const selectedTrack = PREP_TRACKS.find((track) => track.id === focus)
+  const trackChallenges = selectedTrack
+    ? selectedTrack.slugs.flatMap((slug) => {
+        const challenge = challenges?.find((item) => item.slug === slug)
+        return challenge ? [challenge] : []
+      })
+    : []
+  const solvedInTrack = trackChallenges.filter((c) => c.progress.status === 'solved').length
+  const recommended =
+    trackChallenges.find((c) => c.progress.status === 'attempted') ??
+    trackChallenges.find((c) => c.progress.status === 'todo')
+
+  function chooseFocus(value: string) {
+    const next = PREP_TRACKS.some((track) => track.id === value) ? (value as FocusId) : ''
+    setFocus(next)
+    try {
+      if (next) localStorage.setItem(FOCUS_STORAGE_KEY, next)
+      else localStorage.removeItem(FOCUS_STORAGE_KEY)
+    } catch {
+      // Guidance still works for this visit when browser storage is unavailable.
+    }
+  }
 
   if (error) {
     return (
@@ -58,19 +177,118 @@ export default function Catalog() {
         {challenges.length} repos · {challenges.filter((c) => c.progress.status === 'solved').length} solved
       </p>
 
-      <div className="mt-10 flex flex-wrap gap-2">
-        {types.map((t) => (
-          <Button
-            key={t}
-            type="button"
-            variant={filter === t ? 'primary' : 'utility'}
-            size="sm"
-            className={filter === t ? 'rounded-full px-4' : 'rounded-full px-4'}
-            onClick={() => setFilter(t)}
+      <fieldset className="mt-10">
+        <legend className="text-xl font-bold tracking-[-0.015em]">Choose a prep path</legend>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Pick a direction. You can switch whenever you want.
+        </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {PREP_TRACKS.map((track) => {
+            const selected = focus === track.id
+            return (
+              <label
+                key={track.id}
+                className={cn(
+                  'relative cursor-pointer rounded-xl border bg-card p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:shadow-soft focus-within:ring-2 focus-within:ring-ring',
+                  selected && 'border-primary shadow-soft',
+                )}
+              >
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name="prep-focus"
+                  value={track.id}
+                  checked={selected}
+                  onChange={(event) => chooseFocus(event.target.value)}
+                />
+                <span className={cn('mb-5 block size-2.5 rounded-full', track.accent)} aria-hidden="true" />
+                <span className="block font-semibold leading-5">{track.name}</span>
+                <span className="mt-2 block text-sm leading-5 text-muted-foreground">
+                  {track.description}
+                </span>
+                <span className="mt-4 block text-xs font-medium text-muted-foreground">
+                  {track.cadence}
+                </span>
+                {selected && (
+                  <span className="absolute right-3 top-3 text-xs font-semibold text-primary">
+                    Selected
+                  </span>
+                )}
+              </label>
+            )
+          })}
+        </div>
+      </fieldset>
+
+      {selectedTrack && (
+        recommended ? (
+          <Link
+            to={`/c/${recommended.slug}`}
+            aria-label={`${recommended.progress.status === 'attempted' ? 'Continue' : 'Recommended next'}: ${recommended.title}`}
+            className="mt-5 block overflow-hidden rounded-xl border bg-card shadow-soft transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            {t}
-          </Button>
-        ))}
+            <span className="flex flex-wrap items-center gap-5 px-5 py-5 md:px-6">
+              <span className="mr-auto min-w-[220px]">
+                <span className="block text-xs font-semibold text-primary">
+                  {recommended.progress.status === 'attempted' ? 'Continue' : 'Up next'}
+                </span>
+                <span className="mt-1 block text-xl font-bold tracking-[-0.015em]">
+                  {recommended.title}
+                </span>
+                <span className="mt-1 block max-w-2xl text-sm leading-5 text-muted-foreground">
+                  {recommended.blurb}
+                </span>
+              </span>
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>{recommended.difficulty}</span>
+                <span aria-hidden="true">·</span>
+                <span>~{recommended.minutes} min</span>
+              </span>
+              <span className="grid size-10 place-items-center rounded-full bg-primary text-lg text-primary-foreground" aria-hidden="true">
+                →
+              </span>
+            </span>
+            <span className="block border-t bg-background/60 px-5 py-3 md:px-6">
+              <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span>{selectedTrack.name}</span>
+                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className="block h-full rounded-full bg-primary"
+                    style={{
+                      width: `${trackChallenges.length ? (solvedInTrack / trackChallenges.length) * 100 : 0}%`,
+                    }}
+                  />
+                </span>
+                <span>{solvedInTrack} of {trackChallenges.length} completed</span>
+              </span>
+            </span>
+          </Link>
+        ) : (
+          <div className="mt-5 rounded-xl border border-success/30 bg-success/10 px-5 py-4">
+            <span className="font-semibold text-success">Track complete</span>
+            <span className="ml-2 text-sm text-muted-foreground">
+              {solvedInTrack} of {trackChallenges.length} challenges completed
+            </span>
+          </div>
+        )
+      )}
+
+      <div className="mt-12">
+        <h2 className="text-xl font-bold tracking-[-0.015em]">Browse all challenges</h2>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {types.map((t) => (
+            <Button
+              key={t}
+              type="button"
+              variant={filter === t ? 'primary' : 'utility'}
+              size="sm"
+              className="rounded-full px-4"
+              onClick={() => setFilter(t)}
+            >
+              {t}
+            </Button>
+          ))}
+        </div>
       </div>
 
       <div className="mt-8 grid gap-3">
