@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { DiffEditor } from '@monaco-editor/react'
 import ReactMarkdown from 'react-markdown'
-import { api, isAbortError, isNotFoundError, type Solution as SolutionData } from '../api'
+import {
+  api,
+  isAbortError,
+  isNotFoundError,
+  type Debrief,
+  type Solution as SolutionData,
+} from '../api'
 import { LoadError } from '../components/LoadError'
 import { defineGreenlineTheme } from '../monacoTheme'
 import { Button } from '@/components/ui/button'
@@ -96,6 +102,157 @@ function FileBlock({
   )
 }
 
+function DebriefCard({ slug, initial }: { slug: string; initial: Debrief | null }) {
+  const [rootCause, setRootCause] = useState(initial?.root_cause ?? '')
+  const [fixReasoning, setFixReasoning] = useState(initial?.fix_reasoning ?? '')
+  const [tradeoff, setTradeoff] = useState(initial?.tradeoff ?? '')
+  const [useful, setUseful] = useState<boolean | null>(initial?.useful ?? null)
+  const [feedback, setFeedback] = useState(initial?.feedback ?? '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(Boolean(initial))
+  const [error, setError] = useState(false)
+
+  function changed() {
+    setSaved(false)
+    setError(false)
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (useful === null) {
+      setError(true)
+      return
+    }
+    setSaving(true)
+    setError(false)
+    try {
+      await api.saveDebrief(slug, {
+        root_cause: rootCause.trim(),
+        fix_reasoning: fixReasoning.trim(),
+        tradeoff: tradeoff.trim(),
+        useful,
+        feedback: feedback.trim(),
+      })
+      setSaved(true)
+    } catch {
+      setError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fieldClass =
+    'mt-2 min-h-[76px] w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-shadow placeholder:text-muted-foreground focus:ring-2 focus:ring-ring'
+
+  return (
+    <section className="mt-14 rounded-xl border bg-card p-6 shadow-soft md:p-8">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+        Close the loop
+      </p>
+      <h2 className="mt-2 text-2xl font-bold tracking-[-0.02em]">What changed?</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+        Capture the explanation you would give an interviewer. Short answers are enough.
+      </p>
+
+      <form className="mt-7 grid gap-6" onSubmit={(event) => void submit(event)}>
+        <label className="text-sm font-semibold">
+          What was the root cause?
+          <textarea
+            className={fieldClass}
+            value={rootCause}
+            maxLength={1000}
+            required
+            onChange={(event) => {
+              setRootCause(event.target.value)
+              changed()
+            }}
+          />
+        </label>
+        <label className="text-sm font-semibold">
+          Why does the fix work?
+          <textarea
+            className={fieldClass}
+            value={fixReasoning}
+            maxLength={1000}
+            required
+            onChange={(event) => {
+              setFixReasoning(event.target.value)
+              changed()
+            }}
+          />
+        </label>
+        <label className="text-sm font-semibold">
+          What tradeoff did it introduce?
+          <textarea
+            className={fieldClass}
+            value={tradeoff}
+            maxLength={1000}
+            required
+            onChange={(event) => {
+              setTradeoff(event.target.value)
+              changed()
+            }}
+          />
+        </label>
+
+        <div className="border-t pt-6">
+          <p className="text-sm font-semibold">Was this challenge useful?</p>
+          <div className="mt-3 flex gap-2">
+            <Button
+              type="button"
+              variant={useful === true ? 'primary' : 'utility'}
+              size="sm"
+              aria-pressed={useful === true}
+              onClick={() => {
+                setUseful(true)
+                changed()
+              }}
+            >
+              Yes
+            </Button>
+            <Button
+              type="button"
+              variant={useful === false ? 'primary' : 'utility'}
+              size="sm"
+              aria-pressed={useful === false}
+              onClick={() => {
+                setUseful(false)
+                changed()
+              }}
+            >
+              Not really
+            </Button>
+          </div>
+          <label className="mt-5 block text-sm font-semibold">
+            Anything we should improve? <span className="font-normal text-muted-foreground">Optional</span>
+            <textarea
+              className={fieldClass}
+              value={feedback}
+              maxLength={1000}
+              onChange={(event) => {
+                setFeedback(event.target.value)
+                changed()
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="submit" variant="primary" disabled={saving}>
+            {saving ? 'Saving…' : initial ? 'Update debrief' : 'Save debrief'}
+          </Button>
+          {saved && <span className="text-sm font-medium text-success">Saved</span>}
+          {error && (
+            <span className="text-sm text-destructive" role="alert">
+              {useful === null ? 'Choose whether this was useful.' : 'Could not save. Try again.'}
+            </span>
+          )}
+        </div>
+      </form>
+    </section>
+  )
+}
+
 export default function Solution() {
   const { slug = '' } = useParams()
   const [solution, setSolution] = useState<SolutionData | null>(null)
@@ -104,6 +261,9 @@ export default function Solution() {
   const [gated, setGated] = useState(false)
   const [spoiling, setSpoiling] = useState(false)
   const [compareMode, setCompareMode] = useState<CompareMode>('broken')
+  const [solved, setSolved] = useState(false)
+  const [debrief, setDebrief] = useState<Debrief | null>(null)
+  const [debriefLoaded, setDebriefLoaded] = useState(false)
 
   const loadUserFiles = useCallback(
     async (sol: SolutionData, signal?: AbortSignal) => {
@@ -140,12 +300,24 @@ export default function Solution() {
       try {
         const detail = await api.getChallenge(slug, { signal })
         if (signal?.aborted) return
+        const challengeSolved = detail.progress.status === 'solved'
+        setSolved(challengeSolved)
         if (detail.progress.status !== 'solved' && !detail.progress.spoiled) {
           setGated(true)
           return
         }
         setGated(false)
-        await reveal(signal)
+        if (challengeSolved) {
+          const [, savedDebrief] = await Promise.all([
+            reveal(signal),
+            api.getDebrief(slug, { signal }),
+          ])
+          if (signal?.aborted) return
+          setDebrief(savedDebrief)
+          setDebriefLoaded(true)
+        } else {
+          await reveal(signal)
+        }
       } catch (err) {
         if (!isAbortError(err)) setError(true)
       }
@@ -261,6 +433,7 @@ export default function Solution() {
           compareMode={compareMode}
         />
       ))}
+      {solved && debriefLoaded && <DebriefCard slug={slug} initial={debrief} />}
     </main>
   )
 }

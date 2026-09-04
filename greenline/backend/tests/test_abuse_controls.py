@@ -86,7 +86,7 @@ def test_abuse_control_policy_rejects_incoherent_run_capacity() -> None:
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-4 PostgreSQL integration database",
+    reason="requires a schema-version-5 PostgreSQL integration database",
 )
 def test_postgres_rate_limit_and_audit_lifecycle_are_durable() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]

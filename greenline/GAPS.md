@@ -30,13 +30,13 @@ green run → solved state → solution page). A jsdom React integration test no
 that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
 validate both ways (broken repo fails, solution overlay passes) via
 `scripts/validate_challenges.py`.
-The backend currently has 182 passing platform tests covering composition/readiness,
+The backend currently has 197 passing platform tests covering composition/readiness,
 authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
 challenge overlays, and API contracts. The current frontend passes `npm test`,
-`npm run lint`, and `npm run build`; its 21 tests comprise four dependency-free Node
-checks plus 17 Vitest checks covering configured authentication, the design system,
+`npm run lint`, and `npm run build`; its 22 tests comprise four dependency-free Node
+checks plus 18 Vitest checks covering configured authentication, the design system,
 the practice loop, and editor failure navigation. CI is
 `.github/workflows/greenline.yml`.
 
@@ -44,8 +44,8 @@ the practice loop, and editor failure navigation. CI is
 
 | Priority | Work | Why now |
 |---|---|---|
-| Later | Secondary prep-track view and recommended next challenge | Keep curriculum guidance out of the main challenge list for now |
-| Later | Retention practice and weekly publishing workflow | Valuable after the guided track experience is in place |
+| Beta validation | Observe path → run → solve → debrief → return conversion | First-party events and a 30-day operator report are now implemented |
+| Later | Retention practice and weekly publishing workflow | Evaluate after the beta learning loop has real usage |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
 | Now | Production identity, isolation, durable state, and deployment | Active hardening track; every gate is mandatory before public hosting |
 
@@ -112,6 +112,23 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
     that run's structured results. Attempts semantics decided: **every run counts**
     (including post-solve reruns) — see gap 17 / backlog #26.
   - Covered by `backend/tests/test_progress.py`.
+
+### 3a. ~~No guided, measurable beta learning loop~~ — CLOSED
+
+- **Account-synced guidance:** the catalog stores one of four lightweight Prep Paths
+  in the Learner Profile, recommends the next unfinished challenge, and still exposes
+  the full catalog. Existing Local Mode browser selections migrate on first load.
+- **Post-solve reflection:** solved challenge solutions include one compact Learning
+  Debrief for root cause, why the fix works, and the tradeoff. The same form captures
+  useful/not-useful and an optional comment; spoiled-but-unsolved solutions cannot
+  submit a debrief.
+- **First-party measurement:** bounded Product Events cover catalog/return visits,
+  path selection, first/successful runs, and debrief/feedback completion. Events do
+  not copy source code or free text. `scripts/product_metrics.sql` reports the 30-day
+  funnel, per-challenge outcomes, and usefulness feedback directly from PostgreSQL.
+- **Durability:** SQLite preserves the Local Mode workflow, while migration 005 adds
+  tenant-scoped preferences, debriefs, and events to Hosted Mode PostgreSQL. Hosted
+  worker completion records run milestones inside the same fenced transaction.
 
 ### 4. No AI mock interviewer (Gronex's differentiator) — PARKED
 
@@ -344,7 +361,7 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 14. ~~Platform test coverage~~ — CLOSED
 
-- **Implemented:** 182 backend tests now also cover composition/readiness,
+- **Implemented:** 197 backend tests now also cover composition/readiness,
   authentication, tenant isolation, `progress.py` (attempts, sticky
   `solved_at`, non-downgrade, reset, concurrent SQLite, spoiled), `runner.py`
   (green/red/no-tests, stdout+stderr, truncation, container isolation policy), `challenges.py`

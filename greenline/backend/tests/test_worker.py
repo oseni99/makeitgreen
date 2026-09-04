@@ -23,7 +23,7 @@ IMAGE_DIGEST = "sha256:" + "a" * 64
 
 class _ReadyCursor:
     def fetchone(self) -> dict[str, int]:
-        return {"version": 4}
+        return {"version": 5}
 
 
 class _ReadyConnection:

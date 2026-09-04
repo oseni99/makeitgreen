@@ -468,6 +468,29 @@ class PostgresRunJobAdapter:
                     json.dumps(result.get("tests") or []),
                 ),
             ).fetchone()
+            conn.execute(
+                "INSERT INTO product_events "
+                "(user_id, event_name, slug, dedupe_key) "
+                "VALUES (%s, 'first_run', %s, %s) "
+                "ON CONFLICT (user_id, dedupe_key) DO NOTHING",
+                (
+                    claim.user_id,
+                    claim.slug,
+                    f"first_run:{claim.slug}",
+                ),
+            )
+            if green:
+                conn.execute(
+                    "INSERT INTO product_events "
+                    "(user_id, event_name, slug, dedupe_key) "
+                    "VALUES (%s, 'successful_run', %s, %s) "
+                    "ON CONFLICT (user_id, dedupe_key) DO NOTHING",
+                    (
+                        claim.user_id,
+                        claim.slug,
+                        f"successful_run:{claim.slug}",
+                    ),
+                )
             run_meta = {
                 "id": run["id"],
                 "slug": claim.slug,

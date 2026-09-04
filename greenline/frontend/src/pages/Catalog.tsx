@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, isAbortError, type ChallengeMeta } from '../api'
+import { api, isAbortError, type ChallengeMeta, type PrepPath } from '../api'
 import { LoadError } from '../components/LoadError'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -90,7 +90,7 @@ const PREP_TRACKS = [
   },
 ] as const
 
-type FocusId = (typeof PREP_TRACKS)[number]['id']
+type FocusId = PrepPath
 
 function storedFocus(): FocusId | '' {
   try {
@@ -112,18 +112,32 @@ export default function Catalog() {
   const [error, setError] = useState(false)
   const [filter, setFilter] = useState('All')
   const [focus, setFocus] = useState<FocusId | ''>(storedFocus)
+  const [focusSaving, setFocusSaving] = useState(false)
+  const [focusError, setFocusError] = useState(false)
 
-  const load = useCallback((signal?: AbortSignal) => {
-    return api
-      .listChallenges({ signal })
-      .then(setChallenges)
-      .catch((err) => {
-        if (!isAbortError(err)) setError(true)
-      })
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const [items, preferences] = await Promise.all([
+        api.listChallenges({ signal }),
+        api.getPreferences({ signal }),
+      ])
+      if (signal?.aborted) return
+      setChallenges(items)
+      const cached = storedFocus()
+      const synced = preferences.prep_path ?? cached
+      setFocus(synced)
+      if (!preferences.prep_path && cached) {
+        void api.setPrepPath(cached).catch(() => setFocusError(true))
+      }
+      void api.recordVisit().catch(() => undefined)
+    } catch (err) {
+      if (!isAbortError(err)) setError(true)
+    }
   }, [])
 
   useEffect(() => {
     const ac = new AbortController()
+    // oxlint-disable-next-line react/set-state-in-effect -- the effect synchronizes API state.
     void load(ac.signal)
     return () => ac.abort()
   }, [load])
@@ -145,14 +159,26 @@ export default function Catalog() {
     trackChallenges.find((c) => c.progress.status === 'attempted') ??
     trackChallenges.find((c) => c.progress.status === 'todo')
 
-  function chooseFocus(value: string) {
+  async function chooseFocus(value: string) {
     const next = PREP_TRACKS.some((track) => track.id === value) ? (value as FocusId) : ''
+    if (!next || next === focus) return
+    const previous = focus
     setFocus(next)
+    setFocusSaving(true)
+    setFocusError(false)
     try {
-      if (next) localStorage.setItem(FOCUS_STORAGE_KEY, next)
-      else localStorage.removeItem(FOCUS_STORAGE_KEY)
+      await api.setPrepPath(next)
     } catch {
-      // Guidance still works for this visit when browser storage is unavailable.
+      setFocus(previous)
+      setFocusError(true)
+      return
+    } finally {
+      setFocusSaving(false)
+    }
+    try {
+      localStorage.setItem(FOCUS_STORAGE_KEY, next)
+    } catch {
+      // The account-backed preference remains authoritative.
     }
   }
 
@@ -182,6 +208,11 @@ export default function Catalog() {
         <p className="mt-1 text-sm text-muted-foreground">
           Pick a direction. You can switch whenever you want.
         </p>
+        {focusError && (
+          <p className="mt-2 text-sm text-destructive" role="alert">
+            Could not save your prep path. Try again.
+          </p>
+        )}
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PREP_TRACKS.map((track) => {
             const selected = focus === track.id
@@ -199,7 +230,8 @@ export default function Catalog() {
                   name="prep-focus"
                   value={track.id}
                   checked={selected}
-                  onChange={(event) => chooseFocus(event.target.value)}
+                  disabled={focusSaving}
+                  onChange={(event) => void chooseFocus(event.target.value)}
                 />
                 <span className={cn('mb-5 block size-2.5 rounded-full', track.accent)} aria-hidden="true" />
                 <span className="block font-semibold leading-5">{track.name}</span>

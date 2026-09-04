@@ -47,6 +47,7 @@ function installPracticeLoopServer() {
   let runNumber = 0
   const runs: unknown[] = []
   const jobs = new Map<string, unknown>()
+  let debrief: unknown = null
 
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -54,6 +55,12 @@ function installPracticeLoopServer() {
 
     if (url === '/api/challenges' && method === 'GET') {
       return json({ challenges: [challenge] })
+    }
+    if (url === '/api/me/preferences' && method === 'GET') {
+      return json({ prep_path: null })
+    }
+    if (url === '/api/me/visits' && method === 'POST') {
+      return json({ ok: true })
     }
     if (url === '/api/challenges/orders-service' && method === 'GET') {
       return json({
@@ -121,6 +128,16 @@ function installPracticeLoopServer() {
         ],
       })
     }
+    if (url === '/api/challenges/orders-service/debrief' && method === 'GET') {
+      return json({ debrief })
+    }
+    if (url === '/api/challenges/orders-service/debrief' && method === 'PUT') {
+      debrief = {
+        ...JSON.parse(String(init?.body)),
+        updated_at: '2026-09-04T12:00:00Z',
+      }
+      return json({ debrief })
+    }
     throw new Error(`Unhandled request: ${method} ${url}`)
   })
 
@@ -185,5 +202,21 @@ describe('practice loop', () => {
     expect(await screen.findByRole('heading', { name: 'Reference solution' })).toBeTruthy()
     expect(await screen.findByText('Atomic checkout')).toBeTruthy()
     await waitFor(() => expect(screen.getByLabelText('solution diff')).toBeTruthy())
+
+    await user.type(screen.getByLabelText('What was the root cause?'), 'A check-write race.')
+    await user.type(screen.getByLabelText('Why does the fix work?'), 'The mutation is atomic.')
+    await user.type(
+      screen.getByLabelText('What tradeoff did it introduce?'),
+      'The critical section is serialized.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Yes' }))
+    await user.type(screen.getByLabelText(/Anything we should improve/), 'Add a retry case.')
+    await user.click(screen.getByRole('button', { name: 'Save debrief' }))
+
+    expect(await screen.findByText('Saved')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/challenges/orders-service/debrief',
+      expect.objectContaining({ method: 'PUT' }),
+    )
   })
 })

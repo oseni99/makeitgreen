@@ -108,6 +108,23 @@ export interface SearchHit {
   text: string
 }
 
+export type PrepPath = 'foundations' | 'distributed' | 'debugging' | 'senior'
+
+export interface LearnerPreferences {
+  prep_path: PrepPath | null
+}
+
+export interface Debrief {
+  root_cause: string
+  fix_reasoning: string
+  tradeoff: string
+  useful: boolean
+  feedback: string
+  updated_at: string
+}
+
+export type DebriefInput = Omit<Debrief, 'updated_at'>
+
 export type FetchOpts = { signal?: AbortSignal }
 
 export class ApiError extends Error {
@@ -147,6 +164,15 @@ export function fileUrl(slug: string, path: string): string {
 }
 
 export const api = {
+  getPreferences: (opts?: FetchOpts) =>
+    req<LearnerPreferences>('/api/me/preferences', { signal: opts?.signal }),
+  setPrepPath: (prepPath: PrepPath) =>
+    req<LearnerPreferences>('/api/me/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prep_path: prepPath }),
+    }),
+  recordVisit: () => req<{ ok: true }>('/api/me/visits', { method: 'POST' }),
   listChallenges: (opts?: FetchOpts) =>
     req<{ challenges: ChallengeMeta[] }>('/api/challenges', { signal: opts?.signal }).then(
       (d) => d.challenges,
@@ -202,5 +228,15 @@ export const api = {
     req<{ ok: true; progress: Progress }>(`/api/challenges/${slug}/spoil`, { method: 'POST' }),
   getSolution: (slug: string, opts?: FetchOpts) =>
     req<Solution>(`/api/challenges/${slug}/solution`, { signal: opts?.signal }),
+  getDebrief: (slug: string, opts?: FetchOpts) =>
+    req<{ debrief: Debrief | null }>(`/api/challenges/${slug}/debrief`, {
+      signal: opts?.signal,
+    }).then((data) => data.debrief),
+  saveDebrief: (slug: string, debrief: DebriefInput) =>
+    req<{ debrief: Debrief }>(`/api/challenges/${slug}/debrief`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(debrief),
+    }).then((data) => data.debrief),
 }
 import { getAuthToken } from './authToken.ts'

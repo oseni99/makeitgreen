@@ -15,7 +15,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -715,6 +715,85 @@ class RunBody(BaseModel):
     # How long the learner has been working on this challenge (from the
     # workspace timer), in milliseconds. Optional — older clients omit it.
     session_elapsed_ms: int | None = Field(default=None, ge=0)
+
+
+class PrepPath(StrEnum):
+    FOUNDATIONS = "foundations"
+    DISTRIBUTED = "distributed"
+    DEBUGGING = "debugging"
+    SENIOR = "senior"
+
+
+class PreferencesBody(BaseModel):
+    prep_path: PrepPath
+
+
+class DebriefBody(BaseModel):
+    root_cause: str = Field(min_length=1, max_length=1000)
+    fix_reasoning: str = Field(min_length=1, max_length=1000)
+    tradeoff: str = Field(min_length=1, max_length=1000)
+    useful: bool
+    feedback: str = Field(default="", max_length=1000)
+
+    @field_validator("root_cause", "fix_reasoning", "tradeoff")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("feedback")
+    @classmethod
+    def trim_feedback(cls, value: str) -> str:
+        return value.strip()
+
+
+@router.get("/api/me/preferences")
+def get_preferences(request: Request) -> dict:
+    return request_learner_state(request).get_preferences(request_user_id(request))
+
+
+@router.put("/api/me/preferences")
+def put_preferences(body: PreferencesBody, request: Request) -> dict:
+    return request_learner_state(request).set_prep_path(
+        request_user_id(request), body.prep_path.value
+    )
+
+
+@router.post("/api/me/visits")
+def record_visit(request: Request) -> dict:
+    request_learner_state(request).record_visit(request_user_id(request))
+    return {"ok": True}
+
+
+@router.get("/api/challenges/{slug}/debrief")
+def get_debrief(slug: str, request: Request) -> dict:
+    try:
+        ch.load(slug)
+    except ch.ChallengeNotFound:
+        raise HTTPException(404, "challenge not found")
+    debrief = request_learner_state(request).get_debrief(
+        slug, request_user_id(request)
+    )
+    return {"debrief": debrief}
+
+
+@router.put("/api/challenges/{slug}/debrief")
+def put_debrief(slug: str, body: DebriefBody, request: Request) -> dict:
+    try:
+        ch.load(slug)
+    except ch.ChallengeNotFound:
+        raise HTTPException(404, "challenge not found")
+    try:
+        debrief = request_learner_state(request).save_debrief(
+            slug,
+            request_user_id(request),
+            **body.model_dump(),
+        )
+    except learner_state.DebriefRequiresSolved:
+        raise HTTPException(409, "debrief requires a solved challenge")
+    return {"debrief": debrief}
 
 
 @router.get("/api/challenges")

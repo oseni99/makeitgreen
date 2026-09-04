@@ -34,6 +34,22 @@ _Avoid_: volume, checkout
 The tenant-scoped aggregate containing one learner's workspace overlays, progress, and Challenge Run history for one challenge.
 _Avoid_: user files, progress database
 
+**Learner Profile**:
+The tenant-scoped preferences that follow one learner across devices, currently their selected Prep Path.
+_Avoid_: browser setting, local preference
+
+**Prep Path**:
+A learner-selected curriculum that recommends the next challenge without hiding the full catalog.
+_Avoid_: course enrollment, mandatory track
+
+**Learning Debrief**:
+The short post-solve explanation of root cause, why the fix works, and its tradeoff, paired with a usefulness rating and optional product comment.
+_Avoid_: solution notes, AI interview
+
+**Product Event**:
+A bounded first-party learning-loop milestone used for aggregate beta measurement; it never contains source code, debrief text, or the optional product comment.
+_Avoid_: Audit Event, analytics payload
+
 **Run Job**:
 The durable queued, running, or terminal lifecycle that schedules one Hosted Mode Challenge Run and exposes bounded incremental output.
 _Avoid_: background thread, run record
@@ -79,6 +95,9 @@ _Avoid_: Audit Event, print statement
 - In **Hosted Mode**, a **Run Job** durably owns one **Operation Lease** for its learner-and-challenge scope from enqueue through terminal persistence.
 - A worker may publish output or a result only while its claim token and **Operation Lease** fence still match; recovered or superseded workers cannot mutate state.
 - Completing a **Run Job** atomically records Challenge Run history, updates progress, makes the job terminal, and releases its **Operation Lease**.
+- A **Learner Profile** keeps the selected **Prep Path** consistent across authenticated sessions while the catalog remains fully browsable.
+- A **Learning Debrief** may be saved only after the learner solves that challenge and is removed when its Learner Challenge State is reset.
+- A **Product Event** records only bounded milestones; **Audit Events** remain the security/accountability record for admitted mutations.
 - In **Hosted Mode**, every authenticated application request passes **Request Admission** before reaching a route.
 - **Request Admission** creates an **Audit Event** before any mutation and refuses the request when durable admission is unavailable.
 - **Run Job** enqueue atomically enforces global and per-learner active-run capacity across replicas.

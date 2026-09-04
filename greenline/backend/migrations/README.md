@@ -15,6 +15,8 @@ psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/003_abuse_controls.sql
 psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/004_worker_releases.sql
+psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
+  --file backend/migrations/005_beta_learning_loop.sql
 ```
 
 `PostgresLearnerStateAdapter.check_ready()` verifies the exact schema version
@@ -33,3 +35,6 @@ request admission; set the retention explicitly for your operational policy.
 Migration 004 adds short-lived worker release attestations. Workers refresh
 their row only after rechecking Docker and both configured execution images;
 the control plane uses the rows for listener-free exact-release readiness.
+
+Migration 005 adds tenant-scoped prep-path preferences, post-solve debriefs and
+feedback, plus bounded first-party product events for the beta learning loop.

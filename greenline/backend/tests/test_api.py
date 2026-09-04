@@ -99,6 +99,60 @@ def test_challenge_detail_success_and_unknown_404(isolated_api: Path) -> None:
     assert missing.json() == {"detail": "challenge not found"}
 
 
+def test_prep_path_and_visit_are_persisted(isolated_api: Path) -> None:
+    client = TestClient(api.app)
+
+    assert client.get("/api/me/preferences").json() == {"prep_path": None}
+    saved = client.put(
+        "/api/me/preferences", json={"prep_path": "distributed"}
+    )
+    assert saved.status_code == 200
+    assert saved.json() == {"prep_path": "distributed"}
+    assert client.get("/api/me/preferences").json() == {
+        "prep_path": "distributed"
+    }
+    assert client.put(
+        "/api/me/preferences", json={"prep_path": "unknown"}
+    ).status_code == 422
+    assert client.post("/api/me/visits").json() == {"ok": True}
+
+
+def test_debrief_requires_a_solved_challenge_and_round_trips(
+    isolated_api: Path,
+) -> None:
+    _create_challenge(isolated_api, "demo")
+    client = TestClient(api.app)
+    body = {
+        "root_cause": "  A race between the check and write.  ",
+        "fix_reasoning": "The lock makes the mutation atomic.",
+        "tradeoff": "The critical section reduces concurrency.",
+        "useful": True,
+        "feedback": "  Add a retry variant.  ",
+    }
+
+    rejected = client.put("/api/challenges/demo/debrief", json=body)
+    assert rejected.status_code == 409
+    assert rejected.json() == {
+        "detail": "debrief requires a solved challenge"
+    }
+
+    progress.record_run("demo", green=True, passed=1, output="green")
+    saved = client.put("/api/challenges/demo/debrief", json=body)
+    assert saved.status_code == 200
+    assert saved.json()["debrief"]["root_cause"] == (
+        "A race between the check and write."
+    )
+    assert saved.json()["debrief"]["feedback"] == "Add a retry variant."
+    assert client.get("/api/challenges/demo/debrief").json() == saved.json()
+
+    blank = client.put(
+        "/api/challenges/demo/debrief",
+        json={**body, "root_cause": "   "},
+    )
+    assert blank.status_code == 422
+    assert client.get("/api/challenges/missing/debrief").status_code == 404
+
+
 def test_solution_success_and_unknown_404(isolated_api: Path) -> None:
     _create_challenge(
         isolated_api,

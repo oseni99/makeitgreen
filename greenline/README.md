@@ -265,6 +265,16 @@ ladder. Challenge authors should follow **[CONTENT_CADENCE.md](CONTENT_CADENCE.m
 the Node runtime contract and live exercises are documented in
 **[SECOND_LANGUAGE_PLAN.md](SECOND_LANGUAGE_PLAN.md)**.
 
+The catalog persists the learner's selected Prep Path in their account-backed Learner
+Profile and recommends the next unfinished challenge without hiding the full catalog.
+After a successful run, the reference solution offers a short Learning Debrief and a
+usefulness rating. Hosted beta operators can inspect the aggregate 30-day funnel and
+optional comments with:
+
+```sh
+psql "$GREENLINE_DATABASE_URL" --file scripts/product_metrics.sql
+```
+
 ## Known gaps / backlog
 
 See **[GAPS.md](GAPS.md)** — a detailed, prioritized handoff doc covering every known

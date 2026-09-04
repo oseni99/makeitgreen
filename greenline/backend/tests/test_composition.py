@@ -26,7 +26,7 @@ class _ReadyCursor:
         self.query = query
 
     def fetchone(self) -> dict[str, int]:
-        return {"version": 4}
+        return {"version": 5}
 
     def fetchall(self) -> list[dict[str, str]]:
         if "FROM worker_releases" not in self.query:

@@ -22,6 +22,7 @@ DB_PATH = Path(__file__).resolve().parent / "data" / "progress.db"
 
 # Cap stored output so the DB doesn't grow unbounded from huge traces.
 OUTPUT_TAIL_LIMIT = 8000
+PREP_PATHS = frozenset({"foundations", "distributed", "debugging", "senior"})
 
 _SCHEMA_LOCK = threading.Lock()
 _INITIALIZED_DATABASES: set[Path] = set()
@@ -39,13 +40,19 @@ def _has_expected_schema(path: Path) -> bool:
         try:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table' "
-                "AND name IN ('progress', 'runs')"
+                "AND name IN ('progress', 'runs', 'preferences', 'debriefs', 'product_events')"
             ).fetchall()
         finally:
             conn.close()
     except sqlite3.DatabaseError:
         return False
-    return {row[0] for row in rows} == {"progress", "runs"}
+    return {row[0] for row in rows} == {
+        "progress",
+        "runs",
+        "preferences",
+        "debriefs",
+        "product_events",
+    }
 
 
 def _initialize_schema(path: Path) -> None:
@@ -100,6 +107,39 @@ def _initialize_schema(path: Path) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_slug_id ON runs (slug, id DESC)"
         )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS preferences (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                prep_path TEXT,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS debriefs (
+                slug TEXT PRIMARY KEY,
+                root_cause TEXT NOT NULL,
+                fix_reasoning TEXT NOT NULL,
+                tradeoff TEXT NOT NULL,
+                useful INTEGER NOT NULL,
+                feedback TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS product_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_name TEXT NOT NULL,
+                slug TEXT,
+                properties_json TEXT NOT NULL DEFAULT '{}',
+                dedupe_key TEXT UNIQUE,
+                occurred_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_product_events_name_time "
+            "ON product_events (event_name, occurred_at DESC)"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -153,6 +193,31 @@ def _progress_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "solved_at": row["solved_at"],
         "spoiled": bool(raw),
     }
+
+
+def _record_event(
+    conn: sqlite3.Connection,
+    event_name: str,
+    *,
+    slug: str | None = None,
+    properties: dict[str, Any] | None = None,
+    dedupe_key: str | None = None,
+    occurred_at: datetime | None = None,
+) -> bool:
+    timestamp = (occurred_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO product_events "
+        "(event_name, slug, properties_json, dedupe_key, occurred_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            event_name,
+            slug,
+            json.dumps(properties or {}, sort_keys=True),
+            dedupe_key,
+            timestamp.isoformat(),
+        ),
+    )
+    return cursor.rowcount == 1
 
 
 def get_all(user_id: str | None = None) -> dict[str, dict]:
@@ -232,6 +297,19 @@ def record_run(
             ),
         )
         run_id = cur.lastrowid
+        _record_event(
+            conn,
+            "first_run",
+            slug=slug,
+            dedupe_key=f"first_run:{slug}",
+        )
+        if green:
+            _record_event(
+                conn,
+                "successful_run",
+                slug=slug,
+                dedupe_key=f"successful_run:{slug}",
+            )
 
     return {
         "id": run_id,
@@ -304,5 +382,142 @@ def mark_spoiled(slug: str, user_id: str | None = None) -> dict[str, Any]:
 
 def reset(slug: str, user_id: str | None = None) -> None:
     with _conn(user_id) as conn:
+        conn.execute("DELETE FROM debriefs WHERE slug = ?", (slug,))
         conn.execute("DELETE FROM runs WHERE slug = ?", (slug,))
         conn.execute("DELETE FROM progress WHERE slug = ?", (slug,))
+
+
+def get_preferences(user_id: str | None = None) -> dict[str, str | None]:
+    with _conn(user_id) as conn:
+        row = conn.execute(
+            "SELECT prep_path FROM preferences WHERE singleton = 1"
+        ).fetchone()
+    return {"prep_path": row["prep_path"] if row else None}
+
+
+def set_prep_path(prep_path: str, user_id: str | None = None) -> dict[str, str]:
+    if prep_path not in PREP_PATHS:
+        raise ValueError("unknown prep path")
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn(user_id) as conn:
+        previous = conn.execute(
+            "SELECT prep_path FROM preferences WHERE singleton = 1"
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO preferences (singleton, prep_path, updated_at) VALUES (1, ?, ?) "
+            "ON CONFLICT(singleton) DO UPDATE SET prep_path = excluded.prep_path, "
+            "updated_at = excluded.updated_at",
+            (prep_path, now),
+        )
+        if previous is None or previous["prep_path"] != prep_path:
+            _record_event(
+                conn,
+                "path_selected",
+                properties={"prep_path": prep_path},
+            )
+    return {"prep_path": prep_path}
+
+
+def record_visit(
+    user_id: str | None = None, visited_at: datetime | None = None
+) -> None:
+    visit = (visited_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    day = visit.date().isoformat()
+    with _conn(user_id) as conn:
+        prior_visit = conn.execute(
+            "SELECT 1 FROM product_events WHERE event_name = 'catalog_visit' "
+            "AND occurred_at < ? LIMIT 1",
+            (f"{day}T00:00:00+00:00",),
+        ).fetchone()
+        inserted = _record_event(
+            conn,
+            "catalog_visit",
+            dedupe_key=f"catalog_visit:{day}",
+            occurred_at=visit,
+        )
+        if inserted and prior_visit is not None:
+            _record_event(
+                conn,
+                "return_visit",
+                dedupe_key=f"return_visit:{day}",
+                occurred_at=visit,
+            )
+
+
+def get_debrief(slug: str, user_id: str | None = None) -> dict[str, Any] | None:
+    with _conn(user_id) as conn:
+        row = conn.execute(
+            "SELECT root_cause, fix_reasoning, tradeoff, useful, feedback, updated_at "
+            "FROM debriefs WHERE slug = ?",
+            (slug,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "root_cause": row["root_cause"],
+        "fix_reasoning": row["fix_reasoning"],
+        "tradeoff": row["tradeoff"],
+        "useful": bool(row["useful"]),
+        "feedback": row["feedback"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def save_debrief(
+    slug: str,
+    *,
+    root_cause: str,
+    fix_reasoning: str,
+    tradeoff: str,
+    useful: bool,
+    feedback: str = "",
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn(user_id) as conn:
+        state = conn.execute(
+            "SELECT status FROM progress WHERE slug = ?", (slug,)
+        ).fetchone()
+        if state is None or state["status"] != "solved":
+            raise RuntimeError("debrief requires a solved challenge")
+        conn.execute(
+            "INSERT INTO debriefs "
+            "(slug, root_cause, fix_reasoning, tradeoff, useful, feedback, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(slug) DO UPDATE SET root_cause = excluded.root_cause, "
+            "fix_reasoning = excluded.fix_reasoning, tradeoff = excluded.tradeoff, "
+            "useful = excluded.useful, feedback = excluded.feedback, updated_at = excluded.updated_at",
+            (slug, root_cause, fix_reasoning, tradeoff, int(useful), feedback, now, now),
+        )
+        _record_event(
+            conn,
+            "debrief_completed",
+            slug=slug,
+            dedupe_key=f"debrief_completed:{slug}",
+        )
+        _record_event(
+            conn,
+            "feedback_submitted",
+            slug=slug,
+            dedupe_key=f"feedback_submitted:{slug}",
+        )
+    result = get_debrief(slug, user_id)
+    assert result is not None
+    return result
+
+
+def list_product_events(user_id: str | None = None) -> list[dict[str, Any]]:
+    with _conn(user_id) as conn:
+        rows = conn.execute(
+            "SELECT event_name, slug, properties_json, occurred_at "
+            "FROM product_events ORDER BY id"
+        ).fetchall()
+    return [
+        {
+            "event_name": row["event_name"],
+            "slug": row["slug"],
+            "properties": json.loads(row["properties_json"]),
+            "occurred_at": row["occurred_at"],
+        }
+        for row in rows
+    ]

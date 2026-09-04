@@ -12,7 +12,8 @@ import challenges
 import progress
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+PREP_PATHS = frozenset({"foundations", "distributed", "debugging", "senior"})
 
 
 class LearnerStateUnavailable(RuntimeError):
@@ -27,6 +28,28 @@ class LearnerChallengeBusy(RuntimeError):
     """A live operation lease currently owns this Learner Challenge State."""
 
     retry_after = 2
+
+
+class DebriefRequiresSolved(RuntimeError):
+    """A learner may debrief only after completing the Challenge Run."""
+
+
+def _validated_debrief(values: Mapping[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for field in ("root_cause", "fix_reasoning", "tradeoff"):
+        value = values.get(field)
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 1000:
+            raise ValueError(f"{field} must contain 1 to 1000 characters")
+        cleaned[field] = value.strip()
+    feedback = values.get("feedback", "")
+    if not isinstance(feedback, str) or len(feedback.strip()) > 1000:
+        raise ValueError("feedback must contain at most 1000 characters")
+    useful = values.get("useful")
+    if not isinstance(useful, bool):
+        raise ValueError("useful must be a boolean")
+    cleaned["useful"] = useful
+    cleaned["feedback"] = feedback.strip()
+    return cleaned
 
 
 @dataclass(frozen=True)
@@ -52,6 +75,12 @@ class LearnerStateAdapter(Protocol):
     def list_runs(self, slug: str, limit: int, user_id: str | None) -> list[dict[str, Any]]: ...
     def mark_spoiled(self, slug: str, user_id: str | None) -> dict[str, Any]: ...
     def reset(self, slug: str, user_id: str | None) -> None: ...
+    def get_preferences(self, user_id: str | None) -> dict[str, Any]: ...
+    def set_prep_path(self, user_id: str | None, prep_path: str) -> dict[str, Any]: ...
+    def record_visit(self, user_id: str | None, visited_at: datetime | None = None) -> None: ...
+    def get_debrief(self, slug: str, user_id: str | None) -> dict[str, Any] | None: ...
+    def save_debrief(self, slug: str, user_id: str | None, **values: Any) -> dict[str, Any]: ...
+    def list_product_events(self, user_id: str | None) -> list[dict[str, Any]]: ...
 
 
 class LocalLearnerStateAdapter:
@@ -110,6 +139,40 @@ class LocalLearnerStateAdapter:
     def reset(self, slug: str, user_id: str | None) -> None:
         challenges.reset_workspace(slug, user_id)
         progress.reset(slug, user_id=user_id)
+
+    def get_preferences(self, user_id: str | None) -> dict[str, Any]:
+        return progress.get_preferences(user_id)
+
+    def set_prep_path(
+        self, user_id: str | None, prep_path: str
+    ) -> dict[str, Any]:
+        if prep_path not in PREP_PATHS:
+            raise ValueError("unknown prep path")
+        return progress.set_prep_path(prep_path, user_id)
+
+    def record_visit(
+        self, user_id: str | None, visited_at: datetime | None = None
+    ) -> None:
+        progress.record_visit(user_id, visited_at)
+
+    def get_debrief(
+        self, slug: str, user_id: str | None
+    ) -> dict[str, Any] | None:
+        return progress.get_debrief(slug, user_id)
+
+    def save_debrief(
+        self, slug: str, user_id: str | None, **values: Any
+    ) -> dict[str, Any]:
+        values = _validated_debrief(values)
+        try:
+            return progress.save_debrief(slug, user_id=user_id, **values)
+        except RuntimeError as exc:
+            raise DebriefRequiresSolved(str(exc)) from exc
+
+    def list_product_events(
+        self, user_id: str | None
+    ) -> list[dict[str, Any]]:
+        return progress.list_product_events(user_id)
 
 
 class PostgresLearnerStateAdapter:
@@ -257,6 +320,33 @@ class PostgresLearnerStateAdapter:
             "ON CONFLICT (user_id, slug) DO NOTHING",
             (user, slug),
         )
+
+    @staticmethod
+    def _record_product_event(
+        conn: Any,
+        user: str,
+        event_name: str,
+        *,
+        slug: str | None = None,
+        properties: Mapping[str, Any] | None = None,
+        dedupe_key: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> bool:
+        row = conn.execute(
+            "INSERT INTO product_events "
+            "(user_id, event_name, slug, properties, dedupe_key, occurred_at) "
+            "VALUES (%s, %s, %s, %s::jsonb, %s, %s) "
+            "ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id",
+            (
+                user,
+                event_name,
+                slug,
+                json.dumps(dict(properties or {}), sort_keys=True),
+                dedupe_key,
+                occurred_at or datetime.now(timezone.utc),
+            ),
+        ).fetchone()
+        return row is not None
 
     def _begin_mutation(self, conn: Any, user: str, slug: str) -> None:
         """Lock one aggregate and refuse or retire its existing run lease."""
@@ -444,6 +534,21 @@ class PostgresLearnerStateAdapter:
                     json.dumps(values.get("tests") or []),
                 ),
             ).fetchone()
+            self._record_product_event(
+                conn,
+                user,
+                "first_run",
+                slug=slug,
+                dedupe_key=f"first_run:{slug}",
+            )
+            if green:
+                self._record_product_event(
+                    conn,
+                    user,
+                    "successful_run",
+                    slug=slug,
+                    dedupe_key=f"successful_run:{slug}",
+                )
         return {
             "id": row["id"],
             "slug": slug,
@@ -501,3 +606,158 @@ class PostgresLearnerStateAdapter:
                 "DELETE FROM learner_challenges WHERE user_id = %s AND slug = %s",
                 (user, slug),
             )
+
+    def get_preferences(self, user_id: str | None) -> dict[str, Any]:
+        user = self._user(user_id)
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT prep_path FROM learner_preferences WHERE user_id = %s",
+                (user,),
+            ).fetchone()
+        return {"prep_path": row["prep_path"] if row else None}
+
+    def set_prep_path(
+        self, user_id: str | None, prep_path: str
+    ) -> dict[str, Any]:
+        if prep_path not in PREP_PATHS:
+            raise ValueError("unknown prep path")
+        user = self._user(user_id)
+        with self._pool.connection() as conn:
+            previous = conn.execute(
+                "SELECT prep_path FROM learner_preferences WHERE user_id = %s FOR UPDATE",
+                (user,),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO learner_preferences (user_id, prep_path) VALUES (%s, %s) "
+                "ON CONFLICT (user_id) DO UPDATE SET prep_path = EXCLUDED.prep_path, "
+                "updated_at = now()",
+                (user, prep_path),
+            )
+            if previous is None or previous["prep_path"] != prep_path:
+                self._record_product_event(
+                    conn,
+                    user,
+                    "path_selected",
+                    properties={"prep_path": prep_path},
+                )
+        return {"prep_path": prep_path}
+
+    def record_visit(
+        self, user_id: str | None, visited_at: datetime | None = None
+    ) -> None:
+        user = self._user(user_id)
+        visit = (visited_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        day_start = visit.replace(hour=0, minute=0, second=0, microsecond=0)
+        day = visit.date().isoformat()
+        with self._pool.connection() as conn:
+            prior = conn.execute(
+                "SELECT 1 FROM product_events WHERE user_id = %s "
+                "AND event_name = 'catalog_visit' AND occurred_at < %s LIMIT 1",
+                (user, day_start),
+            ).fetchone()
+            inserted = self._record_product_event(
+                conn,
+                user,
+                "catalog_visit",
+                dedupe_key=f"catalog_visit:{day}",
+                occurred_at=visit,
+            )
+            if inserted and prior is not None:
+                self._record_product_event(
+                    conn,
+                    user,
+                    "return_visit",
+                    dedupe_key=f"return_visit:{day}",
+                    occurred_at=visit,
+                )
+
+    @staticmethod
+    def _debrief(row: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "root_cause": row["root_cause"],
+            "fix_reasoning": row["fix_reasoning"],
+            "tradeoff": row["tradeoff"],
+            "useful": row["useful"],
+            "feedback": row["feedback"],
+            "updated_at": row["updated_at"].isoformat(),
+        }
+
+    def get_debrief(
+        self, slug: str, user_id: str | None
+    ) -> dict[str, Any] | None:
+        user = self._user(user_id)
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT root_cause, fix_reasoning, tradeoff, useful, feedback, updated_at "
+                "FROM challenge_debriefs WHERE user_id = %s AND slug = %s",
+                (user, slug),
+            ).fetchone()
+        return None if row is None else self._debrief(row)
+
+    def save_debrief(
+        self, slug: str, user_id: str | None, **values: Any
+    ) -> dict[str, Any]:
+        user = self._user(user_id)
+        values = _validated_debrief(values)
+        with self._pool.connection() as conn:
+            state = conn.execute(
+                "SELECT status FROM learner_challenges "
+                "WHERE user_id = %s AND slug = %s FOR UPDATE",
+                (user, slug),
+            ).fetchone()
+            if state is None or state["status"] != "solved":
+                raise DebriefRequiresSolved("debrief requires a solved challenge")
+            row = conn.execute(
+                "INSERT INTO challenge_debriefs "
+                "(user_id, slug, root_cause, fix_reasoning, tradeoff, useful, feedback) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (user_id, slug) DO UPDATE SET "
+                "root_cause = EXCLUDED.root_cause, fix_reasoning = EXCLUDED.fix_reasoning, "
+                "tradeoff = EXCLUDED.tradeoff, useful = EXCLUDED.useful, "
+                "feedback = EXCLUDED.feedback, updated_at = now() "
+                "RETURNING root_cause, fix_reasoning, tradeoff, useful, feedback, updated_at",
+                (
+                    user,
+                    slug,
+                    values["root_cause"],
+                    values["fix_reasoning"],
+                    values["tradeoff"],
+                    values["useful"],
+                    values.get("feedback", ""),
+                ),
+            ).fetchone()
+            self._record_product_event(
+                conn,
+                user,
+                "debrief_completed",
+                slug=slug,
+                dedupe_key=f"debrief_completed:{slug}",
+            )
+            self._record_product_event(
+                conn,
+                user,
+                "feedback_submitted",
+                slug=slug,
+                dedupe_key=f"feedback_submitted:{slug}",
+            )
+        return self._debrief(row)
+
+    def list_product_events(
+        self, user_id: str | None
+    ) -> list[dict[str, Any]]:
+        user = self._user(user_id)
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT event_name, slug, properties, occurred_at FROM product_events "
+                "WHERE user_id = %s ORDER BY id",
+                (user,),
+            ).fetchall()
+        return [
+            {
+                "event_name": row["event_name"],
+                "slug": row["slug"],
+                "properties": row["properties"],
+                "occurred_at": row["occurred_at"].isoformat(),
+            }
+            for row in rows
+        ]

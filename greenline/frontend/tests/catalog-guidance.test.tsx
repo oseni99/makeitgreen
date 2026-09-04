@@ -13,13 +13,25 @@ function json(body: unknown): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 it('guides a selected prep path toward an attempted challenge', async () => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () =>
-      json({
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      if (url === '/api/me/preferences' && method === 'GET') {
+        return json({ prep_path: null })
+      }
+      if (url === '/api/me/preferences' && method === 'PUT') {
+        return json({ prep_path: JSON.parse(String(init?.body)).prep_path })
+      }
+      if (url === '/api/me/visits' && method === 'POST') {
+        return json({ ok: true })
+      }
+      return json({
         challenges: [
           {
             slug: 'orders-service',
@@ -44,8 +56,8 @@ it('guides a selected prep path toward an attempted challenge', async () => {
             progress: { status: 'todo', attempts: 0 },
           },
         ],
-      }),
-    ),
+      })
+    }),
   )
 
   const user = userEvent.setup()
