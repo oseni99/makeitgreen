@@ -8,6 +8,13 @@ sandboxed test runner, and reviewed reference solutions.
 
 ## Architecture
 
+For the complete browser-to-database-to-execution walkthrough, including what
+is stored in PostgreSQL and why the catalog can feel slow, see
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+For the low-cost invited-beta topology, current readiness audit, and launch
+sequence, see [`DEPLOY_DIGITALOCEAN.md`](DEPLOY_DIGITALOCEAN.md).
+
 ```
 greenline/
 ├── backend/          FastAPI
