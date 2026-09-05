@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,8 @@ PYTEST_CONFIG_FILES = {
     "setup.cfg",
 }
 TIMEOUT_SECONDS = 60
+VARIANT_SEPARATOR = "@"
+VARIANT_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 CHALLENGES_DIR = Path(__file__).resolve().parent.parent / "challenges"
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
@@ -42,6 +45,15 @@ STRING_METADATA_FIELDS = {
 }
 NUMBER_METADATA_FIELDS = {"minutes", "order"}
 PATH_LIST_METADATA_FIELDS = {"readonly", "creatable"}
+VARIANT_OVERRIDE_FIELDS = {
+    "language",
+    "runtime",
+    "readonly",
+    "creatable",
+    "brief",
+    "blurb",
+    "minutes",
+}
 
 
 def validate_documented_field_types(meta: dict[str, object]) -> None:
@@ -68,11 +80,19 @@ def validate_documented_field_types(meta: dict[str, object]) -> None:
 def discover_slugs() -> list[str]:
     if not CHALLENGES_DIR.is_dir():
         return []
-    return sorted(
+    slugs = sorted(
         child.name
         for child in CHALLENGES_DIR.iterdir()
         if child.is_dir() and (child / "challenge.json").is_file()
     )
+    refs: list[str] = []
+    for slug in slugs:
+        refs.append(slug)
+        meta = load_metadata(CHALLENGES_DIR / slug)
+        variants = meta.get("variants") or {}
+        if isinstance(variants, dict):
+            refs.extend(f"{slug}{VARIANT_SEPARATOR}{variant}" for variant in variants)
+    return refs
 
 
 def load_metadata(challenge: Path) -> dict[str, object]:
@@ -86,11 +106,44 @@ def load_metadata(challenge: Path) -> dict[str, object]:
     if not isinstance(meta, dict):
         raise ValueError("challenge metadata must be an object")
     validate_documented_field_types(meta)
+    variants = meta.get("variants")
+    if variants is not None:
+        if not isinstance(variants, dict) or not variants:
+            raise ValueError("variants must be a non-empty object")
+        for variant_id, config in variants.items():
+            if not isinstance(variant_id, str) or not VARIANT_ID.fullmatch(variant_id):
+                raise ValueError("variant IDs must be lowercase kebab-case")
+            if not isinstance(config, dict):
+                raise ValueError(f"variant {variant_id} must be an object")
+            unexpected = set(config) - VARIANT_OVERRIDE_FIELDS
+            if unexpected:
+                raise ValueError(f"variant {variant_id} has unsupported fields")
+            if (
+                not isinstance(config.get("language"), str)
+                or not config["language"].strip()
+            ):
+                raise ValueError(f"variant {variant_id} requires language")
+            validate_documented_field_types(config)
     return meta
 
 
-def runtime_config(challenge: Path) -> tuple[list[str], str]:
+def _variant_metadata(challenge: Path, variant_id: str | None) -> dict[str, object]:
     meta = load_metadata(challenge)
+    if variant_id is None:
+        return meta
+    variants = meta.get("variants") or {}
+    if not isinstance(variants, dict) or variant_id not in variants:
+        raise ValueError(f"unknown variant {variant_id}")
+    config = variants[variant_id]
+    if not isinstance(config, dict):
+        raise ValueError(f"variant {variant_id} must be an object")
+    return {**meta, **config}
+
+
+def runtime_config(
+    challenge: Path, variant_id: str | None = None
+) -> tuple[list[str], str]:
+    meta = _variant_metadata(challenge, variant_id)
     runtime = meta.get("runtime") or {}
     if not isinstance(runtime, dict):
         raise ValueError("runtime must be an object")
@@ -105,7 +158,11 @@ def runtime_config(challenge: Path) -> tuple[list[str], str]:
         if kind != "python":
             raise ValueError("non-Python runtimes require runtime.command")
         command = ["{python}", "-m", "pytest", "-q", "--color=no", "-p", "no:cacheprovider"]
-    if not isinstance(command, list) or not command or not all(isinstance(v, str) and v for v in command):
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(v, str) and v for v in command)
+    ):
         raise ValueError("runtime.command must be a non-empty string array")
     requirements = runtime.get("requirements")
     if requirements is not None:
@@ -116,7 +173,12 @@ def runtime_config(challenge: Path) -> tuple[list[str], str]:
             or ".." in Path(requirements).parts
         ):
             raise ValueError("runtime.requirements must be a safe relative path")
-        if not (challenge / "repo" / requirements).is_file():
+        repo = (
+            challenge / "repo"
+            if variant_id is None
+            else challenge / "variants" / variant_id / "repo"
+        )
+        if not (repo / requirements).is_file():
             raise ValueError("runtime.requirements does not exist")
     return command, report
 
@@ -157,14 +219,16 @@ def _run_command(command: list[str], workdir: Path) -> tuple[int, str]:
     return proc.returncode, output
 
 
-def run_suite(challenge: Path, workdir: Path) -> tuple[int, str]:
+def run_suite(
+    challenge: Path, workdir: Path, variant_id: str | None = None
+) -> tuple[int, str]:
     metadata_path = challenge / "challenge.json"
     if not metadata_path.is_file():
         return run_pytest(workdir)
-    meta = load_metadata(challenge)
+    meta = _variant_metadata(challenge, variant_id)
     if not meta.get("runtime"):
         return run_pytest(workdir)
-    command, _report = runtime_config(challenge)
+    command, _report = runtime_config(challenge, variant_id)
     runtime = meta.get("runtime") or {}
     python = sys.executable
     requirements_name = runtime.get("requirements")
@@ -175,7 +239,12 @@ def run_suite(challenge: Path, workdir: Path) -> tuple[int, str]:
         try:
             from environments import python_for
 
-            python = python_for(challenge / "repo" / requirements_name)
+            repo = (
+                challenge / "repo"
+                if variant_id is None
+                else challenge / "variants" / variant_id / "repo"
+            )
+            python = python_for(repo / requirements_name)
         finally:
             sys.path.remove(str(BACKEND_DIR))
     substitutions = {"{python}": python, "{repo}": str(workdir), "{json_report}": str(workdir / ".report.json")}
@@ -236,9 +305,19 @@ def _fail(label: str) -> str:
 
 
 def validate_challenge(slug: str) -> bool:
-    challenge = CHALLENGES_DIR / slug
-    repo = challenge / "repo"
-    solution = challenge / "solution"
+    concept_slug, separator, variant_id = slug.partition(VARIANT_SEPARATOR)
+    selected_variant = variant_id if separator else None
+    challenge = CHALLENGES_DIR / concept_slug
+    repo = (
+        challenge / "repo"
+        if selected_variant is None
+        else challenge / "variants" / selected_variant / "repo"
+    )
+    solution = (
+        challenge / "solution"
+        if selected_variant is None
+        else challenge / "variants" / selected_variant / "solution"
+    )
     print(f"== {slug}")
 
     if not repo.is_dir():
@@ -252,7 +331,11 @@ def validate_challenge(slug: str) -> bool:
         pristine = tmpdir / "pristine"
         copy_repo(repo, pristine)
         try:
-            exit_code, output = run_suite(challenge, pristine)
+            exit_code, output = (
+                run_suite(challenge, pristine)
+                if selected_variant is None
+                else run_suite(challenge, pristine, selected_variant)
+            )
         except ValueError as exc:
             print(_fail(f"   metadata : {exc}"))
             return False
@@ -266,12 +349,16 @@ def validate_challenge(slug: str) -> bool:
         overlaid = tmpdir / "solution"
         copy_repo(repo, overlaid)
         try:
-            meta = load_metadata(challenge)
+            meta = _variant_metadata(challenge, selected_variant)
             overlay_solution(overlaid, solution, meta)
         except ProtectedSolutionPath as exc:
             print(_fail(f"   solution : protected path {exc}"))
             return False
-        exit_code, output = run_suite(challenge, overlaid)
+        exit_code, output = (
+            run_suite(challenge, overlaid)
+            if selected_variant is None
+            else run_suite(challenge, overlaid, selected_variant)
+        )
         if exit_code == 0:
             print(_ok("   solution : exit 0  (expected pass)"))
         else:
@@ -290,7 +377,7 @@ def _tail(output: str, limit: int = 40) -> str:
 
 def main() -> int:
     slugs = discover_slugs()
-    print(f"Validating {len(slugs)} challenge(s) in {CHALLENGES_DIR}")
+    print(f"Validating {len(slugs)} challenge variant(s) in {CHALLENGES_DIR}")
     if not slugs:
         print("No challenges found (expected */challenge.json).")
         return 1
@@ -302,9 +389,9 @@ def main() -> int:
 
     print()
     if failures:
-        print(f"{len(failures)}/{len(slugs)} challenge(s) failed: {', '.join(failures)}")
+        print(f"{len(failures)}/{len(slugs)} challenge variant(s) failed: {', '.join(failures)}")
         return 1
-    print(f"{len(slugs)}/{len(slugs)} challenges valid (pristine fails, solution passes).")
+    print(f"{len(slugs)}/{len(slugs)} challenge variants valid (pristine fails, solution passes).")
     return 0
 
 

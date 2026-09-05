@@ -796,13 +796,42 @@ def put_debrief(slug: str, body: DebriefBody, request: Request) -> dict:
     return {"debrief": debrief}
 
 
+def _empty_progress() -> dict:
+    return {"status": "todo", "attempts": 0, "spoiled": False}
+
+
+def _catalog_progress(variants: list[dict]) -> dict:
+    progress_items = [variant["progress"] for variant in variants]
+    if any(item["status"] == "solved" for item in progress_items):
+        status = "solved"
+    elif any(item["status"] == "attempted" for item in progress_items):
+        status = "attempted"
+    else:
+        status = "todo"
+    return {
+        "status": status,
+        "attempts": sum(item.get("attempts", 0) for item in progress_items),
+        "spoiled": any(item.get("spoiled", False) for item in progress_items),
+    }
+
+
+def _with_variant_progress(meta: dict, progress: dict[str, dict]) -> dict:
+    variants = [
+        {**variant, "progress": progress.get(variant["slug"], _empty_progress())}
+        for variant in meta["variants"]
+    ]
+    selected = progress.get(meta["slug"], _empty_progress())
+    return {**meta, "variants": variants, "progress": selected}
+
+
 @router.get("/api/challenges")
 def list_challenges(request: Request) -> dict:
     prog = request_learner_state(request).get_all(request_user_id(request))
     items = []
     for meta in ch.load_all():
-        p = prog.get(meta["slug"], {"status": "todo", "attempts": 0, "spoiled": False})
-        items.append({**meta, "progress": p})
+        item = _with_variant_progress(meta, prog)
+        item["progress"] = _catalog_progress(item["variants"])
+        items.append(item)
     return {"challenges": items}
 
 
@@ -815,10 +844,8 @@ def get_challenge(slug: str, request: Request) -> dict:
         tree = state.file_tree(slug, user_id)
     except ch.ChallengeNotFound:
         raise HTTPException(404, "challenge not found")
-    prog = state.get_all(user_id).get(
-        slug, {"status": "todo", "attempts": 0, "spoiled": False}
-    )
-    return {**meta, "files": tree, "progress": prog}
+    item = _with_variant_progress(meta, state.get_all(user_id))
+    return {**item, "files": tree}
 
 
 @router.get("/api/challenges/{slug}/files/{path:path}")

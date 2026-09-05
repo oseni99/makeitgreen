@@ -7,5 +7,13 @@
   "language": "Python",
   "blurb": "A payments wallet is letting users overdraft and waiving fees on small transfers. Read the spec in the tests, fix the service.",
   "brief": "This wallet module powers peer-to-peer transfers. Finance has flagged two incidents:\n\n1. Some accounts have **negative balances** after transfers.\n2. Small transfers are going through with **zero fees** — the fee schedule says every transfer costs at least 1 cent.\n\nThe failing tests encode the correct business rules. Read them like a spec, then fix `wallet_service/service.py`.\n\n**Your job:** all tests green. Don't change what passing tests already verify.",
-  "readonly": ["tests/"]
+  "readonly": ["tests/"],
+  "variants": {
+    "javascript": {
+      "language": "JavaScript",
+      "brief": "This Node.js wallet module powers peer-to-peer transfers. Finance found negative balances and zero-fee small transfers.\n\nRead the tests as the business contract. All amounts are integer cents, every transfer costs 1% with a 1-cent minimum, and a failed transfer must not mutate either balance.\n\n**Your job:** repair `src/service.js` without weakening the passing behavior.",
+      "readonly": ["test/"],
+      "runtime": {"kind": "node", "command": ["node", "--test"], "report": "text"}
+    }
+  }
 }

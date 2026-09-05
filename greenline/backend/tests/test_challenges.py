@@ -208,3 +208,108 @@ def test_declared_requirements_file_is_intrinsically_readonly() -> None:
     meta = {"runtime": {"kind": "python", "requirements": "requirements.txt"}}
 
     assert ch.is_readonly(meta, "requirements.txt") is True
+
+
+def test_language_variant_loads_its_own_repository_and_solution(
+    isolated_challenges: Path,
+) -> None:
+    challenge = _write_challenge(
+        isolated_challenges,
+        "demo",
+        meta={
+            "title": "Demo",
+            "language": "Python",
+            "variants": {
+                "javascript": {
+                    "language": "JavaScript",
+                    "runtime": {
+                        "kind": "node",
+                        "command": ["node", "--test"],
+                        "report": "text",
+                    },
+                }
+            },
+        },
+        repo_files={"main.py": "broken python\n"},
+        solution_files={"main.py": "fixed python\n"},
+    )
+    js_repo = challenge / "variants" / "javascript" / "repo"
+    js_solution = challenge / "variants" / "javascript" / "solution"
+    js_repo.mkdir(parents=True)
+    js_solution.mkdir(parents=True)
+    (js_repo / "main.js").write_text("broken js\n", encoding="utf-8")
+    (js_solution / "main.js").write_text("fixed js\n", encoding="utf-8")
+
+    python = ch.load("demo")
+    javascript = ch.load("demo@javascript")
+
+    assert python["variant"] == "python"
+    assert python["language"] == "Python"
+    assert javascript["slug"] == "demo@javascript"
+    assert javascript["concept_slug"] == "demo"
+    assert javascript["variant"] == "javascript"
+    assert javascript["language"] == "JavaScript"
+    assert [variant["slug"] for variant in javascript["variants"]] == [
+        "demo",
+        "demo@javascript",
+    ]
+    assert ch.read_file("demo", "main.py") == "broken python\n"
+    assert ch.read_file("demo@javascript", "main.js") == "broken js\n"
+    assert ch.solution_files("demo@javascript")["files"][0]["content"] == (
+        "fixed js\n"
+    )
+
+
+def test_language_variant_workspace_is_separate_from_default_workspace(
+    isolated_challenges: Path,
+) -> None:
+    challenge = _write_challenge(
+        isolated_challenges,
+        "demo",
+        meta={
+            "title": "Demo",
+            "language": "Python",
+            "variants": {
+                "javascript": {
+                    "language": "JavaScript",
+                    "runtime": {"kind": "node", "command": ["node", "--test"]},
+                }
+            },
+        },
+        repo_files={"main.py": "python\n"},
+    )
+    js_repo = challenge / "variants" / "javascript" / "repo"
+    js_repo.mkdir(parents=True)
+    (js_repo / "main.js").write_text("javascript\n", encoding="utf-8")
+
+    ch.write_file("demo", "main.py", "edited python\n")
+    ch.write_file("demo@javascript", "main.js", "edited javascript\n")
+
+    assert ch.read_file("demo", "main.py") == "edited python\n"
+    assert ch.read_file("demo@javascript", "main.js") == "edited javascript\n"
+    assert ch.workspace_dir("demo") != ch.workspace_dir("demo@javascript")
+
+
+@pytest.mark.parametrize(
+    "variants",
+    [
+        [],
+        {},
+        {"JavaScript": {"language": "JavaScript"}},
+        {"javascript": "JavaScript"},
+        {"javascript": {}},
+        {"javascript": {"language": "JavaScript", "directory": "elsewhere"}},
+        {"javascript": {"language": "JavaScript", "runtime": {"kind": "node"}}},
+    ],
+)
+def test_invalid_language_variants_are_rejected(
+    isolated_challenges: Path, variants: object
+) -> None:
+    _write_challenge(
+        isolated_challenges,
+        "bad-variant",
+        meta={"title": "Bad variant", "variants": variants},
+    )
+
+    with pytest.raises(ch.InvalidChallengeMetadata):
+        ch.load("bad-variant")

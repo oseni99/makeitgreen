@@ -1,0 +1,6 @@
+03:14:00.001 partner status=503 request=evt-91 attempt=1
+03:14:00.001 partner status=503 request=evt-91 attempt=2
+03:14:00.002 partner status=503 request=evt-91 attempt=3
+03:14:00.002 outbound_rate baseline=800/s current=2400/s
+03:14:01.100 partner status=400 request=evt-92 attempt=1
+03:14:01.100 partner status=400 request=evt-92 attempt=2

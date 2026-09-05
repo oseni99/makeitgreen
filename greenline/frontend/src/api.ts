@@ -4,8 +4,18 @@ export interface Progress {
   spoiled?: boolean
 }
 
+export interface ChallengeVariant {
+  id: string
+  language: string
+  slug: string
+  progress: Progress
+}
+
 export interface ChallengeMeta {
   slug: string
+  concept_slug?: string
+  variant?: string
+  variants?: ChallengeVariant[]
   title: string
   type: string
   difficulty: string

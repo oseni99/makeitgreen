@@ -810,6 +810,30 @@ export default function Workspace() {
               <span aria-hidden="true">·</span>
               <span>{challenge.progress.attempts} {challenge.progress.attempts === 1 ? 'attempt' : 'attempts'}</span>
             </div>
+            {(challenge.variants?.length ?? 0) > 1 && (
+              <div className="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Challenge language">
+                <span className="mr-1 text-xs font-medium text-muted-foreground">Language</span>
+                {challenge.variants?.map((variant) => {
+                  const selected = variant.slug === slug
+                  return (
+                    <button
+                      key={variant.id}
+                      type="button"
+                      aria-pressed={selected}
+                      className={cn(
+                        'min-h-8 rounded-full border px-3 text-xs font-semibold transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        selected && 'border-primary bg-primary text-primary-foreground hover:text-primary-foreground',
+                      )}
+                      onClick={() => {
+                        if (!selected) navigate(`/c/${variant.slug}`)
+                      }}
+                    >
+                      {variant.language}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

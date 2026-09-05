@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, isAbortError, type ChallengeMeta, type PrepPath } from '../api'
+import {
+  api,
+  isAbortError,
+  type ChallengeMeta,
+  type ChallengeVariant,
+  type PrepPath,
+} from '../api'
 import { LoadError } from '../components/LoadError'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -107,6 +113,26 @@ function statusLabel(status: ChallengeMeta['progress']['status']) {
   return '○ TODO'
 }
 
+function variantsFor(challenge: ChallengeMeta): ChallengeVariant[] {
+  return challenge.variants ?? [
+    {
+      id: challenge.variant ?? 'default',
+      language: challenge.language,
+      slug: challenge.slug,
+      progress: challenge.progress,
+    },
+  ]
+}
+
+function preferredVariant(challenge: ChallengeMeta): ChallengeVariant {
+  const variants = variantsFor(challenge)
+  return (
+    variants.find((variant) => variant.progress.status === 'attempted') ??
+    variants.find((variant) => variant.progress.status === 'todo') ??
+    variants[0]
+  )
+}
+
 export default function Catalog() {
   const [challenges, setChallenges] = useState<ChallengeMeta[] | null>(null)
   const [error, setError] = useState(false)
@@ -200,7 +226,7 @@ export default function Catalog() {
     <main className="mx-auto max-w-[1080px] px-6 py-16 md:px-10 md:py-24">
       <h1 className="text-[clamp(2.5rem,5vw,3.375rem)] font-bold leading-none tracking-[-0.035em]">Challenges</h1>
       <p className="mt-4 text-muted-foreground">
-        {challenges.length} repos · {challenges.filter((c) => c.progress.status === 'solved').length} solved
+        {challenges.length} challenges · {challenges.filter((c) => c.progress.status === 'solved').length} solved
       </p>
 
       <fieldset className="mt-10">
@@ -255,7 +281,7 @@ export default function Catalog() {
       {selectedTrack && (
         recommended ? (
           <Link
-            to={`/c/${recommended.slug}`}
+            to={`/c/${preferredVariant(recommended).slug}`}
             aria-label={`${recommended.progress.status === 'attempted' ? 'Continue' : 'Recommended next'}: ${recommended.title}`}
             className="mt-5 block overflow-hidden rounded-xl border bg-card shadow-soft transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
@@ -272,6 +298,8 @@ export default function Catalog() {
                 </span>
               </span>
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>{variantsFor(recommended).map((variant) => variant.language).join(' / ')}</span>
+                <span aria-hidden="true">·</span>
                 <span>{recommended.difficulty}</span>
                 <span aria-hidden="true">·</span>
                 <span>~{recommended.minutes} min</span>
@@ -324,36 +352,68 @@ export default function Catalog() {
       </div>
 
       <div className="mt-8 grid gap-3">
-        {shown.map((c) => (
-          <Link
-            to={`/c/${c.slug}`}
-            className="group rounded-lg border bg-card p-5 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-black/20 hover:shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            key={c.slug}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-auto min-w-[220px] text-lg font-semibold tracking-[-0.01em]">{c.title}</span>
-              <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{c.type}</span>
-              <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">{c.difficulty}</span>
-              <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">~{c.minutes} min</span>
-              <span className="flex gap-1.5">
-                <span
-                  className={cn(
-                    'rounded-full px-2.5 py-1 text-[11px] font-semibold',
-                    c.progress.status === 'solved' && 'bg-success/10 text-success',
-                    c.progress.status === 'attempted' && 'bg-warning/10 text-warning',
-                    c.progress.status === 'todo' && 'bg-muted text-muted-foreground',
-                  )}
+        {shown.map((c) => {
+          const variants = variantsFor(c)
+          return (
+            <article
+              className="rounded-lg border bg-card p-5 transition-[border-color,box-shadow] hover:border-black/20 hover:shadow-soft"
+              key={c.concept_slug ?? c.slug}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={`/c/${preferredVariant(c).slug}`}
+                  className="mr-auto min-w-[220px] text-lg font-semibold tracking-[-0.01em] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  {statusLabel(c.progress.status)}
-                </span>
-                {c.progress.spoiled && (
-                  <span className="rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive">SPOILED</span>
+                  {c.title}
+                </Link>
+                <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{c.type}</span>
+                <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">{c.difficulty}</span>
+                {variants.length === 1 && (
+                  <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">{c.language}</span>
                 )}
-              </span>
-            </div>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{c.blurb}</p>
-          </Link>
-        ))}
+                <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">~{c.minutes} min</span>
+                <span className="flex gap-1.5">
+                  <span
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-[11px] font-semibold',
+                      c.progress.status === 'solved' && 'bg-success/10 text-success',
+                      c.progress.status === 'attempted' && 'bg-warning/10 text-warning',
+                      c.progress.status === 'todo' && 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {statusLabel(c.progress.status)}
+                  </span>
+                  {c.progress.spoiled && (
+                    <span className="rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive">SPOILED</span>
+                  )}
+                </span>
+              </div>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{c.blurb}</p>
+              {variants.length > 1 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+                  <span className="mr-1 text-xs font-medium text-muted-foreground">Solve in</span>
+                  {variants.map((variant) => (
+                    <Link
+                      key={variant.id}
+                      to={`/c/${variant.slug}`}
+                      className={cn(
+                        'inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        variant.progress.status === 'attempted' && 'border-warning/40 bg-warning/10 text-warning',
+                        variant.progress.status === 'solved' && 'border-success/40 bg-success/10 text-success',
+                      )}
+                      aria-label={`${c.title}: ${variant.language}, ${variant.progress.status}`}
+                    >
+                      {variant.language}
+                      {variant.progress.status !== 'todo' && (
+                        <span aria-hidden="true">{variant.progress.status === 'solved' ? '✓' : '◐'}</span>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </article>
+          )
+        })}
       </div>
     </main>
   )

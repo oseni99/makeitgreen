@@ -7,5 +7,13 @@
   "language": "Python",
   "blurb": "A feed's opaque cursor repeats and skips records when new events arrive between page requests.",
   "brief": "Clients report duplicate feed entries while scrolling during active traffic. The API already returns an opaque `next_cursor`, but its behavior is not stable when rows are inserted between requests.\n\nExplore `pagination/service.py` and read the contract tests. Preserve the public page shape and cursor opacity. A stable order requires `created_at` plus a deterministic tie-breaker.\n\n**Your job:** replace the unstable pagination behavior with opaque keyset pagination so an insertion between page requests cannot shift the remaining traversal.",
-  "readonly": ["tests/"]
+  "readonly": ["tests/"],
+  "variants": {
+    "javascript": {
+      "language": "JavaScript",
+      "brief": "Clients of this Node.js activity feed see duplicate and skipped entries while new events arrive. The API already returns an opaque `nextCursor`, but it encodes an unstable position.\n\nPreserve the public page shape and cursor opacity. Order by `createdAt` with a deterministic ID tie-breaker, and reject malformed cursors cleanly.\n\n**Your job:** replace offset behavior in `src/pagination.js` with stable keyset pagination.",
+      "readonly": ["test/"],
+      "runtime": {"kind": "node", "command": ["node", "--test"], "report": "text"}
+    }
+  }
 }

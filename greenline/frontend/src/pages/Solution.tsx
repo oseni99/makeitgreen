@@ -22,6 +22,14 @@ function editorHeight(fixed: string, original: string): number {
   return Math.min(520, Math.max(180, lines * 19 + 40))
 }
 
+function editorLanguage(path: string): string {
+  if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) return 'javascript'
+  if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'typescript'
+  if (path.endsWith('.json')) return 'json'
+  if (path.endsWith('.md')) return 'markdown'
+  return 'python'
+}
+
 function FileBlock({
   path,
   fixed,
@@ -78,7 +86,7 @@ function FileBlock({
             key={compareMode}
             original={left}
             modified={fixed}
-            language="python"
+            language={editorLanguage(path)}
             beforeMount={defineGreenlineTheme}
             theme="greenline"
             options={{

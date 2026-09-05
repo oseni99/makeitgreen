@@ -7,5 +7,13 @@
   "language": "Python",
   "blurb": "A token authorizer is accepting lookalike credentials and unrelated scopes. Restore exact authentication and capability checks.",
   "brief": "This service authorizes internal API calls with opaque bearer tokens. A recent incident showed that a token copied from a longer credential was accepted, and callers could pass a scope that merely appeared inside another scope name.\n\nRead the tests as the contract. Tokens and scopes must match exactly, and a failed authorization must raise the documented error.\n\n**Your job:** make every test green without weakening the existing passing behavior.",
-  "readonly": ["tests/"]
+  "readonly": ["tests/"],
+  "variants": {
+    "javascript": {
+      "language": "JavaScript",
+      "brief": "This Node.js service authorizes internal API calls with opaque bearer tokens. An incident showed that token prefixes and fragments of capability names were accepted.\n\nRead the tests as the contract. Credentials and scopes must match exactly, and failures must throw the documented `Unauthorized` error.\n\n**Your job:** repair `src/authorizer.js` without weakening valid access.",
+      "readonly": ["test/"],
+      "runtime": {"kind": "node", "command": ["node", "--test"], "report": "text"}
+    }
+  }
 }

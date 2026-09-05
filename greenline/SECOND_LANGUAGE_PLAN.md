@@ -1,8 +1,37 @@
 # Second-language runtime: Node.js
 
-Two dependency-free Node challenges are live: `webhook-batch-node` at catalog order 29
-and `notification-dispatch-node` at order 33. Both use Node's built-in test runner and
-the platform's validated runtime metadata.
+Node is available in two forms: standalone Node-native concepts and alternate
+language implementations of existing concepts. `webhook-batch-node` and
+`notification-dispatch-node` remain standalone because their scenarios are designed
+around Node. Six concepts now offer a Python/JavaScript choice:
+
+- `orders-service` — asynchronous inventory race;
+- `wallet-service` — money invariants and atomic failure;
+- `config-merge` — recursive merging without truthiness bugs or mutation;
+- `token-auth-api` — exact credential and capability matching;
+- `pagination-api` — stable opaque keyset pagination;
+- `retry-storm` — classified retries, backpressure, and attempt budgets.
+
+Together, the paired concepts and two Node-native exercises provide eight runnable
+JavaScript interview challenges across concurrency, repository implementation, API
+contract debugging, incident debugging, and architecture extension.
+
+## Language-variant product contract
+
+- The catalog shows one card per interview concept, with compact language choices.
+- The base slug remains the default implementation (`orders-service` is Python).
+- Additional implementations use `<slug>@<variant>` as their API and persistence key
+  (`orders-service@javascript`). Files, runs, attempts, spoilers, and debriefs are
+  isolated per implementation.
+- Concept progress is solved when any implementation is solved and attempted when any
+  implementation is attempted. Variant-level progress remains visible on each choice.
+- A variant can override only language-specific presentation, edit boundaries, timing,
+  and runtime policy. It cannot silently change the concept identity or catalog order.
+- Every starter and solution pair is independently validated red/green.
+
+The representative beta set is complete. Expanding the remaining concepts should be
+driven by beta demand and retain this review bar; it is a content project, not a
+mechanical transpilation task.
 
 ## First challenge: `webhook-batch-node`
 

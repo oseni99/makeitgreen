@@ -171,7 +171,7 @@ describe('practice loop', () => {
     render(<RouterProvider router={router} />)
 
     expect(await screen.findByRole('heading', { name: 'Challenges' })).toBeTruthy()
-    await user.click(screen.getByRole('link', { name: /orders-service/i }))
+    await user.click(screen.getByRole('link', { name: 'orders-service' }))
 
     const editor = await screen.findByRole('textbox', { name: 'code editor' })
     expect((editor as HTMLTextAreaElement).value).toBe('def checkout():\n    return "broken"\n')

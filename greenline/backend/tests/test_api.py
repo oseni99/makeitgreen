@@ -77,6 +77,49 @@ def test_catalog_lists_challenges_with_progress(isolated_api: Path) -> None:
     assert items[1]["progress"]["status"] == "todo"
 
 
+def test_catalog_groups_language_variants_and_detail_selects_one(
+    isolated_api: Path,
+) -> None:
+    challenge = _create_challenge(
+        isolated_api,
+        "demo",
+        meta={
+            "title": "Demo",
+            "language": "Python",
+            "variants": {
+                "javascript": {
+                    "language": "JavaScript",
+                    "runtime": {"kind": "node", "command": ["node", "--test"]},
+                }
+            },
+        },
+        repo_files={"main.py": "pass\n"},
+    )
+    js_repo = challenge / "variants" / "javascript" / "repo"
+    js_repo.mkdir(parents=True)
+    (js_repo / "main.js").write_text("export const answer = 1\n", encoding="utf-8")
+    progress.record_run("demo@javascript", green=True, passed=1, output="green")
+
+    client = TestClient(api.app)
+    catalog = client.get("/api/challenges").json()["challenges"]
+    assert len(catalog) == 1
+    assert catalog[0]["slug"] == "demo"
+    assert catalog[0]["progress"]["status"] == "solved"
+    assert [variant["slug"] for variant in catalog[0]["variants"]] == [
+        "demo",
+        "demo@javascript",
+    ]
+    assert catalog[0]["variants"][0]["progress"]["status"] == "todo"
+    assert catalog[0]["variants"][1]["progress"]["status"] == "solved"
+
+    detail = client.get("/api/challenges/demo@javascript").json()
+    assert detail["concept_slug"] == "demo"
+    assert detail["variant"] == "javascript"
+    assert detail["language"] == "JavaScript"
+    assert detail["progress"]["status"] == "solved"
+    assert [file["path"] for file in detail["files"]] == ["main.js"]
+
+
 def test_challenge_detail_success_and_unknown_404(isolated_api: Path) -> None:
     _create_challenge(
         isolated_api,

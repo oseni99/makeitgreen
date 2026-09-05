@@ -35,6 +35,8 @@ it('guides a selected prep path toward an attempted challenge', async () => {
         challenges: [
           {
             slug: 'orders-service',
+            concept_slug: 'orders-service',
+            variant: 'python',
             title: 'Orders service',
             type: 'Concurrency',
             difficulty: 'Medium',
@@ -43,9 +45,25 @@ it('guides a selected prep path toward an attempted challenge', async () => {
             blurb: 'Repair the checkout race.',
             brief: 'Make checkout atomic.',
             progress: { status: 'attempted', attempts: 1 },
+            variants: [
+              {
+                id: 'python',
+                language: 'Python',
+                slug: 'orders-service',
+                progress: { status: 'todo', attempts: 0 },
+              },
+              {
+                id: 'javascript',
+                language: 'JavaScript',
+                slug: 'orders-service@javascript',
+                progress: { status: 'attempted', attempts: 1 },
+              },
+            ],
           },
           {
             slug: 'transfer-deadlock',
+            concept_slug: 'transfer-deadlock',
+            variant: 'python',
             title: 'Transfer deadlock',
             type: 'Concurrency',
             difficulty: 'Medium',
@@ -54,6 +72,20 @@ it('guides a selected prep path toward an attempted challenge', async () => {
             blurb: 'Establish a global lock order.',
             brief: 'Remove the deadlock.',
             progress: { status: 'todo', attempts: 0 },
+            variants: [
+              {
+                id: 'python',
+                language: 'Python',
+                slug: 'transfer-deadlock',
+                progress: { status: 'todo', attempts: 0 },
+              },
+              {
+                id: 'javascript',
+                language: 'JavaScript',
+                slug: 'transfer-deadlock@javascript',
+                progress: { status: 'todo', attempts: 0 },
+              },
+            ],
           },
         ],
       })
@@ -70,7 +102,17 @@ it('guides a selected prep path toward an attempted challenge', async () => {
   await user.click(await screen.findByRole('radio', { name: /Distributed correctness/i }))
 
   const recommendation = screen.getByRole('link', { name: 'Continue: Orders service' })
-  expect(recommendation.getAttribute('href')).toBe('/c/orders-service')
+  expect(recommendation.getAttribute('href')).toBe('/c/orders-service@javascript')
+  expect(
+    screen
+      .getByRole('link', { name: 'Orders service: Python, todo' })
+      .getAttribute('href'),
+  ).toBe('/c/orders-service')
+  expect(
+    screen
+      .getByRole('link', { name: 'Orders service: JavaScript, attempted' })
+      .getAttribute('href'),
+  ).toBe('/c/orders-service@javascript')
   expect(screen.getByText('0 of 2 completed')).toBeTruthy()
   expect(localStorage.getItem('greenline-prep-focus')).toBe('distributed')
   expect(screen.getByText('Selected')).toBeTruthy()

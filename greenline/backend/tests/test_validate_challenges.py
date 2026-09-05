@@ -207,3 +207,55 @@ def test_validator_rejects_empty_runtime_requirements(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="requirements"):
         validate_challenges.runtime_config(challenge)
+
+
+def test_validator_discovers_and_validates_language_variant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    variant = challenge / "variants" / "javascript"
+    (challenge / "repo").mkdir(parents=True)
+    (challenge / "solution").mkdir()
+    (variant / "repo").mkdir(parents=True)
+    (variant / "solution").mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps(
+            {
+                "language": "Python",
+                "variants": {
+                    "javascript": {
+                        "language": "JavaScript",
+                        "runtime": {
+                            "kind": "node",
+                            "command": ["node", "--test"],
+                        },
+                    }
+                },
+            }
+        )
+    )
+    (variant / "repo" / "main.js").write_text("broken\n")
+    (variant / "solution" / "main.js").write_text("fixed\n")
+
+    calls: list[tuple[Path, str | None]] = []
+
+    def fake_run_suite(
+        _challenge: Path,
+        workdir: Path,
+        variant_id: str | None = None,
+    ) -> tuple[int, str]:
+        calls.append((workdir, variant_id))
+        content = (workdir / "main.js").read_text()
+        return (0 if content == "fixed\n" else 1, "")
+
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(validate_challenges, "run_suite", fake_run_suite)
+
+    assert validate_challenges.discover_slugs() == [
+        "demo",
+        "demo@javascript",
+    ]
+    assert validate_challenges.validate_challenge("demo@javascript") is True
+    assert [variant_id for _, variant_id in calls] == ["javascript", "javascript"]

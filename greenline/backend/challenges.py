@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CHALLENGES_DIR = BASE_DIR / "challenges"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 WORKSPACES_DIR = DATA_DIR / "workspaces"
+VARIANT_SEPARATOR = "@"
+VARIANT_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 IGNORED = {"__pycache__", ".pytest_cache", ".git", ".venv"}
 
@@ -58,6 +61,15 @@ STRING_METADATA_FIELDS = {
 }
 NUMBER_METADATA_FIELDS = {"minutes", "order"}
 PATH_LIST_METADATA_FIELDS = {"readonly", "creatable"}
+VARIANT_OVERRIDE_FIELDS = {
+    "language",
+    "runtime",
+    "readonly",
+    "creatable",
+    "brief",
+    "blurb",
+    "minutes",
+}
 
 
 def _has_valid_documented_field_types(meta: dict[str, Any]) -> bool:
@@ -82,6 +94,54 @@ def _has_valid_documented_field_types(meta: dict[str, Any]) -> bool:
     return True
 
 
+def _validate_runtime(runtime: object, slug: str) -> None:
+    if runtime is None:
+        return
+    if not isinstance(runtime, dict):
+        raise InvalidChallengeMetadata(slug)
+    if runtime.get("kind", "python") not in {"python", "node"}:
+        raise InvalidChallengeMetadata(slug)
+    command = runtime.get("command")
+    if command is not None and (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(part, str) and part for part in command)
+    ):
+        raise InvalidChallengeMetadata(slug)
+    if runtime.get("kind") == "node" and command is None:
+        raise InvalidChallengeMetadata(slug)
+    default_report = "text" if runtime.get("kind") == "node" else "pytest-json"
+    if runtime.get("report", default_report) not in {"pytest-json", "text"}:
+        raise InvalidChallengeMetadata(slug)
+    requirements = runtime.get("requirements")
+    if requirements is not None and (
+        not isinstance(requirements, str)
+        or not requirements
+        or Path(requirements).is_absolute()
+        or ".." in Path(requirements).parts
+    ):
+        raise InvalidChallengeMetadata(slug)
+
+
+def _validate_variants(variants: object, slug: str) -> None:
+    if variants is None:
+        return
+    if not isinstance(variants, dict) or not variants:
+        raise InvalidChallengeMetadata(slug)
+    for variant_id, config in variants.items():
+        if not isinstance(variant_id, str) or not VARIANT_ID.fullmatch(variant_id):
+            raise InvalidChallengeMetadata(slug)
+        if not isinstance(config, dict):
+            raise InvalidChallengeMetadata(slug)
+        if any(field not in VARIANT_OVERRIDE_FIELDS for field in config):
+            raise InvalidChallengeMetadata(slug)
+        if not isinstance(config.get("language"), str) or not config["language"].strip():
+            raise InvalidChallengeMetadata(slug)
+        if not _has_valid_documented_field_types(config):
+            raise InvalidChallengeMetadata(slug)
+        _validate_runtime(config.get("runtime"), slug)
+
+
 def _load_metadata(meta_path: Path) -> dict[str, Any]:
     try:
         raw = meta_path.read_text(encoding="utf-8")
@@ -92,32 +152,8 @@ def _load_metadata(meta_path: Path) -> dict[str, Any]:
         raise InvalidChallengeMetadata(meta_path.parent.name)
     if not _has_valid_documented_field_types(meta):
         raise InvalidChallengeMetadata(meta_path.parent.name)
-    runtime = meta.get("runtime")
-    if runtime is not None:
-        if not isinstance(runtime, dict):
-            raise InvalidChallengeMetadata(meta_path.parent.name)
-        if runtime.get("kind", "python") not in {"python", "node"}:
-            raise InvalidChallengeMetadata(meta_path.parent.name)
-        command = runtime.get("command")
-        if command is not None and (
-            not isinstance(command, list)
-            or not command
-            or not all(isinstance(part, str) and part for part in command)
-        ):
-            raise InvalidChallengeMetadata(meta_path.parent.name)
-        if runtime.get("kind") == "node" and command is None:
-            raise InvalidChallengeMetadata(meta_path.parent.name)
-        default_report = "text" if runtime.get("kind") == "node" else "pytest-json"
-        if runtime.get("report", default_report) not in {"pytest-json", "text"}:
-            raise InvalidChallengeMetadata(meta_path.parent.name)
-        requirements = runtime.get("requirements")
-        if requirements is not None and (
-            not isinstance(requirements, str)
-            or not requirements
-            or Path(requirements).is_absolute()
-            or ".." in Path(requirements).parts
-        ):
-            raise InvalidChallengeMetadata(meta_path.parent.name)
+    _validate_runtime(meta.get("runtime"), meta_path.parent.name)
+    _validate_variants(meta.get("variants"), meta_path.parent.name)
     return meta
 
 
@@ -128,34 +164,95 @@ def _read_text_file(path: Path) -> str:
         raise InvalidChallengeFileEncoding(path) from exc
 
 
+def _default_variant(meta: dict[str, Any]) -> str:
+    runtime = meta.get("runtime") or {}
+    return "javascript" if runtime.get("kind") == "node" else "python"
+
+
+def _split_ref(ref: str) -> tuple[str, str | None]:
+    if ref.count(VARIANT_SEPARATOR) > 1:
+        raise ChallengeNotFound(ref)
+    if VARIANT_SEPARATOR not in ref:
+        return ref, None
+    slug, variant = ref.split(VARIANT_SEPARATOR, 1)
+    if not slug or not VARIANT_ID.fullmatch(variant):
+        raise ChallengeNotFound(ref)
+    return slug, variant
+
+
+def _variant_descriptors(slug: str, meta: dict[str, Any]) -> list[dict[str, str]]:
+    default_id = _default_variant(meta)
+    descriptors = [
+        {
+            "id": default_id,
+            "language": meta.get(
+                "language",
+                "JavaScript" if default_id == "javascript" else "Python",
+            ),
+            "slug": slug,
+        }
+    ]
+    for variant_id, config in (meta.get("variants") or {}).items():
+        if variant_id == default_id:
+            raise InvalidChallengeMetadata(slug)
+        descriptors.append(
+            {
+                "id": variant_id,
+                "language": config["language"],
+                "slug": f"{slug}{VARIANT_SEPARATOR}{variant_id}",
+            }
+        )
+    return descriptors
+
+
 def load_all() -> list[dict[str, Any]]:
     out = []
     for meta_path in sorted(CHALLENGES_DIR.glob("*/challenge.json")):
-        meta = _load_metadata(meta_path)
-        meta["slug"] = meta_path.parent.name
-        out.append(meta)
+        out.append(load(meta_path.parent.name))
     out.sort(key=lambda m: m.get("order", 999))
     return out
 
 
 def load(slug: str) -> dict[str, Any]:
-    meta_path = CHALLENGES_DIR / slug / "challenge.json"
+    concept_slug, requested_variant = _split_ref(slug)
+    meta_path = CHALLENGES_DIR / concept_slug / "challenge.json"
     if not meta_path.is_file():
         raise ChallengeNotFound(slug)
     meta = _load_metadata(meta_path)
-    meta["slug"] = slug
+    default_id = _default_variant(meta)
+    variant_id = requested_variant or default_id
+    variants = _variant_descriptors(concept_slug, meta)
+    if variant_id != default_id:
+        config = (meta.get("variants") or {}).get(variant_id)
+        if config is None:
+            raise ChallengeNotFound(slug)
+        meta.update(config)
+    meta["slug"] = concept_slug if variant_id == default_id else slug
+    meta["concept_slug"] = concept_slug
+    meta["variant"] = variant_id
+    meta["variants"] = variants
     return meta
 
 
 def repo_dir(slug: str) -> Path:
-    d = CHALLENGES_DIR / slug / "repo"
+    meta = load(slug)
+    concept = CHALLENGES_DIR / meta["concept_slug"]
+    d = (
+        concept / "repo"
+        if meta["slug"] == meta["concept_slug"]
+        else concept / "variants" / meta["variant"] / "repo"
+    )
     if not d.is_dir():
         raise ChallengeNotFound(slug)
     return d
 
 
 def solution_dir(slug: str) -> Path:
-    return CHALLENGES_DIR / slug / "solution"
+    meta = load(slug)
+    concept = CHALLENGES_DIR / meta["concept_slug"]
+    if meta["slug"] == meta["concept_slug"]:
+        return concept / "solution"
+    return concept / "variants" / meta["variant"] / "solution"
 
 
 def _workspace_root(user_id: str | None = None) -> Path:
