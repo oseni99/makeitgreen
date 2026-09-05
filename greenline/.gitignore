@@ -2,6 +2,15 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.egg-info/
 venv/
 .venv/
 
@@ -10,11 +19,26 @@ backend/data/
 
 # Local credentials
 frontend/.env*
+!frontend/.env.example
 backend/.env*
+!backend/.env.example
+
+# Deployment credentials and runtime logs
+deploy/**/secrets/
+deploy/**/logs/
+deploy/**/*.log
+deploy/**/*.jsonl
+backend/logs/
+backend/*.log
+backend/*.jsonl
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+
+# Locally generated image, SBOM, and provenance artifacts
+supply-chain/
 
 # OS / editor
 .DS_Store
