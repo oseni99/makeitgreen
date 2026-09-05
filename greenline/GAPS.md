@@ -35,8 +35,8 @@ authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
 challenge overlays, and API contracts. The current frontend passes `npm test`,
-`npm run lint`, and `npm run build`; its 22 tests comprise four dependency-free Node
-checks plus 18 Vitest checks covering configured authentication, the design system,
+`npm run lint`, and `npm run build`; its 24 tests comprise four dependency-free Node
+checks plus 20 Vitest checks covering configured authentication, the design system,
 the practice loop, and editor failure navigation. CI is
 `.github/workflows/greenline.yml`.
 
@@ -79,11 +79,15 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 1. ~~No timer in the workspace~~ — CLOSED
 
-- **Implemented:** countdown in `ws-header` from `minutes`, persists across reloads
-  (localStorage per slug, `frontend/src/timer.ts`), amber at ≤25% remaining, red +
-  pulsing in overtime, freezes at final time on green run, cleared by Reset.
-- **Server-side elapsed:** each run now stores `session_elapsed_ms` from the workspace
-  timer (see gap 3). Local timer freeze-on-green still applies for the live countdown.
+- **Implemented:** the challenge's `minutes` remains a suggestion; the workspace timer
+  is idle until clicked and explicitly started. Its compact picker offers 15 minutes,
+  the challenge's suggested duration, and 45 minutes; choosing one starts immediately.
+  Once active, clicking the timer pauses or resumes it directly; a small reset action
+  appears while paused. State persists per
+  slug (`frontend/src/timer.ts`), turns amber at ≤25% remaining and red in overtime,
+  freezes at final time on green, and is cleared by workspace Reset.
+- **Server-side elapsed:** each run stores `session_elapsed_ms` only after the learner
+  starts the timer (see gap 3). Untimed runs store `null`; freeze-on-green still applies.
 
 ### 2. ~~Test results are regex-parsed stdout, not structured data~~ — CLOSED
 
@@ -304,8 +308,10 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   `CHALLENGE_BACKLOG.md` for the full content roadmap.
 - **Guidance and cadence:** `PREP_TRACKS.md` provides curated paths and a difficulty
   ladder; `CONTENT_CADENCE.md` defines the weekly release rhythm and validation gates;
-  `SECOND_LANGUAGE_PLAN.md` documents the Node contract. More content remains an
-  ongoing product activity, not an unimplemented platform capability.
+  `SECOND_LANGUAGE_PLAN.md` documents the Node and language-variant contracts.
+  Six concepts now have paired Python/JavaScript implementations, alongside two
+  Node-native challenges. Further language coverage is ongoing reviewed content
+  work, not an unimplemented platform capability.
 - **Authoring recipe** is in `README.md` ("Adding a challenge"); the validation
   discipline that MUST be kept: broken `repo/` fails its declared suite; `repo/` + `solution/`
   overlay passes. `scripts/validate_challenges.py` asserts both states for every

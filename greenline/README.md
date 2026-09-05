@@ -248,6 +248,9 @@ configuration uses Clerk with Google as the sole sign-in provider.
      `{"kind":"python","requirements":"requirements.txt"}` for isolated
      dependencies, or an allowlisted command such as
      `{"kind":"node","command":["node","--test"],"report":"text"}`.
+   - `variants` — optional additional language implementations. Each key is a
+     lowercase variant ID and may override `language`, `runtime`, `readonly`,
+     `creatable`, `brief`, `blurb`, and `minutes`.
    Every `conftest.py` and root pytest config stay read-only regardless.
 2. Put the broken repo in `repo/`. Python challenges use a pytest suite (and may use a
    root `conftest.py`); other runtimes use the command declared in `runtime`. In every
@@ -255,6 +258,12 @@ configuration uses Clerk with Google as the sole sign-in provider.
 3. Put fixed files (same relative paths) + `SOLUTION.md` in `solution/`.
 4. Verify both states: the repo must fail, `repo/` + `solution/` overlay must pass
    (`python scripts/validate_challenges.py` from `greenline/`).
+
+To add another language to an existing concept, keep the default implementation
+in `repo/` and `solution/`, declare it in `variants`, and place its content in
+`variants/<variant>/repo/` and `variants/<variant>/solution/`. The catalog keeps
+one card and lets the learner choose a language. The default state key remains
+the base slug; additional variants use `<slug>@<variant>`.
 
 New content starts in **[QUESTION_BANK.md](QUESTION_BANK.md)**. It tracks researched,
 original candidate questions and their implementation status. New specifications must
