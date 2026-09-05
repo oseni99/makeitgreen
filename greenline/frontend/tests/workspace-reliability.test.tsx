@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -309,15 +309,76 @@ describe('workspace reliability', () => {
     expect(screen.getByText('new result')).toBeTruthy()
   })
 
-  it('recovers from structurally invalid timer JSON without rendering NaN', async () => {
+  it('waits for the learner to choose and start a timer', async () => {
+    const { fetchMock } = installServer()
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await screen.findByDisplayValue('original source')
+    const idleTimer = screen.getByTitle('set timer')
+    expect(idleTimer.textContent).toBe('⏱ Set timer')
+    expect(idleTimer.className).toContain('rounded-md')
+
+    await user.click(idleTimer)
+    const controls = screen.getByRole('dialog', { name: 'Timer controls' })
+    expect(within(controls).getByText('~25 min suggested')).toBeTruthy()
+    await user.click(
+      within(controls).getByRole('button', { name: 'Start 15 minute timer' }),
+    )
+
+    expect(screen.getByTitle('time remaining').textContent).toMatch(/^⏱ 1[45]:\d{2}$/)
+    expect(screen.getByTitle('time remaining').className).toContain('rounded-full')
+    await user.click(screen.getByTitle('time remaining'))
+    expect(screen.getByTitle('timer paused').textContent).toContain('paused')
+    expect(screen.queryByRole('dialog', { name: 'Timer controls' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Reset timer' })).toBeTruthy()
+
+    await user.click(screen.getByTitle('timer paused'))
+    expect(screen.getByTitle('time remaining')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reset timer' })).toBeNull()
+    await user.click(screen.getByTitle('time remaining'))
+
+    const stored = JSON.parse(localStorage.getItem('greenline-timer-orders-service') ?? '{}')
+    expect(stored.status).toBe('paused')
+    expect(stored.durationMinutes).toBe(15)
+
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+    await waitFor(() => {
+      const runRequest = fetchMock.mock.calls.find(
+        ([input, init]) => String(input).endsWith('/runs') && init?.method === 'POST',
+      )
+      expect(JSON.parse(String(runRequest?.[1]?.body)).session_elapsed_ms).toBeGreaterThanOrEqual(0)
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Reset timer' }))
+    expect(screen.getByTitle('set timer').textContent).toBe('⏱ Set timer')
+  })
+
+  it('does not report session time when the learner leaves the timer idle', async () => {
+    const { fetchMock } = installServer()
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await screen.findByDisplayValue('original source')
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+
+    await waitFor(() => {
+      const runRequest = fetchMock.mock.calls.find(
+        ([input, init]) => String(input).endsWith('/runs') && init?.method === 'POST',
+      )
+      expect(JSON.parse(String(runRequest?.[1]?.body)).session_elapsed_ms).toBeNull()
+    })
+  })
+
+  it('recovers from structurally invalid timer JSON as an idle timer', async () => {
     installServer()
     localStorage.setItem('greenline-timer-orders-service', '{}')
     renderWorkspace()
 
     await screen.findByDisplayValue('original source')
-    const timer = screen.getByTitle('time remaining')
+    const timer = screen.getByTitle('set timer')
     expect(timer.textContent).not.toContain('NaN')
-    expect(timer.textContent).toMatch(/^⏱ \d+:\d{2}$/)
+    expect(timer.textContent).toBe('⏱ Set timer')
   })
 
   it('still opens the workspace when persisting recovered timer state fails', async () => {
@@ -330,7 +391,7 @@ describe('workspace reliability', () => {
     renderWorkspace()
 
     expect(await screen.findByDisplayValue('original source')).toBeTruthy()
-    expect((await screen.findByTitle('time remaining')).textContent).not.toContain('NaN')
+    expect((await screen.findByTitle('set timer')).textContent).toBe('⏱ Set timer')
     setItem.mockRestore()
   })
 })

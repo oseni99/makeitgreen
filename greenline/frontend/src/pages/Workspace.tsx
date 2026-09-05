@@ -26,6 +26,9 @@ import {
   elapsedMs,
   formatClock,
   loadTimer,
+  pauseTimer,
+  setTimerDuration,
+  startTimer,
   stopTimer,
   type TimerState,
 } from '../timer'
@@ -40,38 +43,146 @@ function languageFor(path: string): string {
   return 'plaintext'
 }
 
-function Timer({ minutes, state }: { minutes: number; state: TimerState }) {
+function Timer({
+  slug,
+  suggestedMinutes,
+  state,
+  onChange,
+}: {
+  slug: string
+  suggestedMinutes: number
+  state: TimerState
+  onChange: (state: TimerState) => void
+}) {
   const [, tick] = useState(0)
-  const stopped = state.stoppedElapsed !== undefined
+  const [open, setOpen] = useState(false)
+  const running = state.status === 'running'
 
   useEffect(() => {
-    if (stopped) return
+    if (!running) return
     const id = setInterval(() => tick((n) => n + 1), 1000)
     return () => clearInterval(id)
-  }, [stopped])
+  }, [running])
 
-  const budget = minutes * 60_000
+  const budget = state.durationMinutes * 60_000
   const remaining = budget - elapsedMs(state)
   const over = remaining < 0
   const warn = !over && remaining <= budget * 0.25
+  const idle = state.status === 'idle'
+  const paused = state.status === 'paused'
+  const complete = state.status === 'complete'
+  const title = idle
+    ? 'set timer'
+    : paused
+      ? 'timer paused'
+      : complete
+        ? 'final time'
+        : 'time remaining'
+
+  function begin(minutes: number) {
+    const configured = setTimerDuration(slug, state, minutes)
+    onChange(startTimer(slug, configured))
+    setOpen(false)
+  }
+
+  function reset() {
+    onChange(setTimerDuration(slug, state, state.durationMinutes))
+  }
+
+  function handleTimerClick() {
+    if (idle) {
+      setOpen((value) => !value)
+      return
+    }
+    if (complete) {
+      reset()
+      setOpen(true)
+      return
+    }
+    onChange(running ? pauseTimer(slug, state) : startTimer(slug, state))
+  }
 
   return (
-    <span
-      className={cn(
-        'rounded-full border px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums',
-        over && 'border-destructive/25 bg-destructive/10 text-destructive',
-        warn && 'border-warning/25 bg-warning/10 text-warning',
-        !over && !warn && 'border-border bg-muted text-muted-foreground',
-        stopped && 'opacity-70',
+    <div className="relative flex items-center gap-1">
+      <button
+        type="button"
+        className={cn(
+          'min-h-11 border px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8',
+          idle ? 'rounded-md' : 'rounded-full',
+          !idle && over && 'border-destructive/25 bg-destructive/10 text-destructive',
+          !idle && !over && warn && 'border-warning/25 bg-warning/10 text-warning',
+          (idle || (!over && !warn)) && 'border-border bg-muted text-muted-foreground',
+          (paused || complete) && 'opacity-80',
+        )}
+        title={title}
+        aria-label={
+          idle ? 'Set timer' : running ? 'Pause timer' : paused ? 'Resume timer' : 'Change timer'
+        }
+        aria-haspopup={idle ? 'dialog' : undefined}
+        aria-expanded={idle ? open : undefined}
+        onClick={handleTimerClick}
+      >
+        {idle
+          ? '⏱ Set timer'
+          : complete
+            ? `⏱ ${formatClock(elapsedMs(state))}`
+            : over
+              ? `⏱ +${formatClock(remaining)} over${paused ? ' · paused' : ''}`
+              : `⏱ ${formatClock(remaining)}${paused ? ' · paused' : ''}`}
+      </button>
+
+      {paused && (
+        <button
+          type="button"
+          className="grid size-11 place-items-center rounded-full text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-8"
+          title="reset timer"
+          aria-label="Reset timer"
+          onClick={reset}
+        >
+          ↺
+        </button>
       )}
-      title={stopped ? 'final time' : 'time remaining'}
-    >
-      {stopped
-        ? `⏱ ${formatClock(elapsedMs(state))}`
-        : over
-          ? `⏱ +${formatClock(remaining)} over`
-          : `⏱ ${formatClock(remaining)}`}
-    </span>
+
+      {open && idle && (
+        <div
+          role="dialog"
+          aria-label="Timer controls"
+          className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-56 rounded-md border bg-card p-3 text-sm shadow-elevated"
+        >
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-foreground">Timer</p>
+            <span className="text-[11px] text-muted-foreground">~{suggestedMinutes} min suggested</span>
+            <button
+              type="button"
+              className="ml-auto grid size-11 place-items-center rounded-sm text-xs text-muted-foreground hover:bg-muted hover:text-foreground sm:size-6"
+              aria-label="Close timer controls"
+              onClick={() => setOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
+            {(suggestedMinutes === 45 ? [15, 30, 45] : [15, suggestedMinutes, 45]).map((minutes) => (
+              <button
+                key={minutes}
+                type="button"
+                className={cn(
+                  'h-11 rounded-sm px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-7',
+                  suggestedMinutes === minutes
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-card hover:text-foreground',
+                )}
+                aria-label={`Start ${minutes} minute timer`}
+                onClick={() => begin(minutes)}
+              >
+                {minutes}m
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -322,8 +433,8 @@ export default function Workspace() {
       const detail = await api.getChallenge(slug, { signal })
       if (signal?.aborted) return
       setChallenge(detail)
-      // Solved challenges keep their frozen time; unsolved ones (re)start the clock.
-      const t = loadTimer(slug)
+      // The estimate seeds an idle timer; only the learner starts the clock.
+      const t = loadTimer(slug, detail.minutes)
       setTimer(detail.progress.status === 'solved' ? stopTimer(slug, t) : t)
       const first = selectInitialEditableFile(detail.files)
       if (first) {
@@ -542,7 +653,7 @@ export default function Workspace() {
     setDrawerTab('results')
     try {
       await saveAll()
-      const sessionMs = timer ? elapsedMs(timer) : undefined
+      const sessionMs = timer && timer.status !== 'idle' ? elapsedMs(timer) : undefined
       const job = await api.startRun(slug, sessionMs)
       let offset = 0
       let streamedOutput = ''
@@ -670,7 +781,7 @@ export default function Workspace() {
     setRunsError(false)
     setSelectedRunId(null)
     setSearchHits([])
-    setTimer(clearTimer(slug))
+    setTimer(clearTimer(slug, challenge?.minutes ?? timer?.durationMinutes ?? 25))
     await load()
   }
 
@@ -755,7 +866,14 @@ export default function Workspace() {
           <span className="hidden items-center gap-1.5 text-[11px] text-muted-foreground lg:flex">
             <span className="size-1.5 rounded-full bg-success" aria-hidden="true" /> autosaved
           </span>
-          {timer && <Timer minutes={challenge.minutes} state={timer} />}
+          {timer && (
+            <Timer
+              slug={slug}
+              suggestedMinutes={challenge.minutes}
+              state={timer}
+              onChange={setTimer}
+            />
+          )}
           <Button
             type="button"
             variant={mobileSideOpen ? 'primary' : 'utility'}

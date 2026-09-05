@@ -1,73 +1,159 @@
+export type TimerStatus = 'idle' | 'running' | 'paused' | 'complete'
+
 export interface TimerState {
-  startedAt: number
-  stoppedElapsed?: number
+  durationMinutes: number
+  accumulatedMs: number
+  status: TimerStatus
+  startedAt?: number
 }
 
+const MIN_MINUTES = 1
+const MAX_MINUTES = 180
 const key = (slug: string) => `greenline-timer-${slug}`
+
+function validMinutes(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_MINUTES &&
+    value <= MAX_MINUTES
+  )
+}
 
 function isTimerState(value: unknown): value is TimerState {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<TimerState>
-  const startedAt = candidate.startedAt
-  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt < 0) return false
-  const stoppedElapsed = candidate.stoppedElapsed
+  const startedAtValid =
+    candidate.startedAt === undefined ||
+    (typeof candidate.startedAt === 'number' &&
+      Number.isFinite(candidate.startedAt) &&
+      candidate.startedAt >= 0)
   return (
-    stoppedElapsed === undefined ||
-    (typeof stoppedElapsed === 'number' && Number.isFinite(stoppedElapsed) && stoppedElapsed >= 0)
+    validMinutes(candidate.durationMinutes) &&
+    typeof candidate.accumulatedMs === 'number' &&
+    Number.isFinite(candidate.accumulatedMs) &&
+    candidate.accumulatedMs >= 0 &&
+    ['idle', 'running', 'paused', 'complete'].includes(candidate.status ?? '') &&
+    startedAtValid &&
+    (candidate.status === 'running' ? candidate.startedAt !== undefined : true)
   )
 }
 
-function persist(slug: string, state: TimerState): void {
+function freshTimer(suggestedMinutes: number): TimerState {
+  return {
+    durationMinutes: validMinutes(suggestedMinutes) ? suggestedMinutes : 25,
+    accumulatedMs: 0,
+    status: 'idle',
+  }
+}
+
+function persist(slug: string, state: TimerState): TimerState {
   try {
     localStorage.setItem(key(slug), JSON.stringify(state))
   } catch {
     // Storage can be disabled or full; timing should not prevent the workspace loading.
   }
+  return state
 }
 
-export function loadTimer(slug: string): TimerState {
+function migrateLegacyTimer(value: unknown, suggestedMinutes: number): TimerState | null {
+  if (!value || typeof value !== 'object') return null
+  const legacy = value as { startedAt?: unknown; stoppedElapsed?: unknown }
+  if (
+    typeof legacy.startedAt !== 'number' ||
+    !Number.isFinite(legacy.startedAt) ||
+    legacy.startedAt < 0
+  ) {
+    return null
+  }
+  const stopped = legacy.stoppedElapsed
+  if (typeof stopped === 'number' && Number.isFinite(stopped) && stopped >= 0) {
+    return {
+      ...freshTimer(suggestedMinutes),
+      accumulatedMs: stopped,
+      status: 'complete',
+    }
+  }
+  return {
+    ...freshTimer(suggestedMinutes),
+    accumulatedMs: Math.max(0, Date.now() - legacy.startedAt),
+    status: 'paused',
+  }
+}
+
+export function loadTimer(slug: string, suggestedMinutes: number): TimerState {
   try {
     const raw = localStorage.getItem(key(slug))
     if (raw) {
       const parsed: unknown = JSON.parse(raw)
       if (isTimerState(parsed)) return parsed
+      const migrated = migrateLegacyTimer(parsed, suggestedMinutes)
+      if (migrated) return persist(slug, migrated)
     }
   } catch {
-    // corrupted state — start fresh
+    // Corrupted or unavailable storage starts with an idle timer.
   }
-  const fresh: TimerState = { startedAt: Date.now() }
-  persist(slug, fresh)
-  return fresh
+  return persist(slug, freshTimer(suggestedMinutes))
+}
+
+export function setTimerDuration(
+  slug: string,
+  state: TimerState,
+  durationMinutes: number,
+): TimerState {
+  if (!validMinutes(durationMinutes)) return state
+  return persist(slug, {
+    durationMinutes,
+    accumulatedMs: 0,
+    status: 'idle',
+  })
+}
+
+export function startTimer(slug: string, state: TimerState): TimerState {
+  if (state.status === 'running' || state.status === 'complete') return state
+  return persist(slug, {
+    ...state,
+    status: 'running',
+    startedAt: Date.now(),
+  })
+}
+
+export function pauseTimer(slug: string, state: TimerState): TimerState {
+  if (state.status !== 'running') return state
+  return persist(slug, {
+    durationMinutes: state.durationMinutes,
+    accumulatedMs: elapsedMs(state),
+    status: 'paused',
+  })
 }
 
 export function stopTimer(
   slug: string,
   state: TimerState,
-  finalElapsed = Date.now() - state.startedAt,
+  finalElapsed?: number,
 ): TimerState {
-  if (state.stoppedElapsed !== undefined) return state
-  const stopped: TimerState = { ...state, stoppedElapsed: finalElapsed }
-  persist(slug, stopped)
-  return stopped
+  if (state.status === 'idle' || state.status === 'complete') return state
+  return persist(slug, {
+    durationMinutes: state.durationMinutes,
+    accumulatedMs: finalElapsed ?? elapsedMs(state),
+    status: 'complete',
+  })
 }
 
-export function clearTimer(slug: string): TimerState {
+export function clearTimer(slug: string, suggestedMinutes: number): TimerState {
   try {
     localStorage.removeItem(key(slug))
   } catch {
-    // Continue with an in-memory fresh timer when storage is unavailable.
+    // Continue with an in-memory idle timer when storage is unavailable.
   }
-  return loadTimer(slug)
+  return persist(slug, freshTimer(suggestedMinutes))
 }
 
 export function elapsedMs(state: TimerState): number {
-  const stoppedElapsed = state.stoppedElapsed
-  if (typeof stoppedElapsed === 'number' && Number.isFinite(stoppedElapsed) && stoppedElapsed >= 0) {
-    return stoppedElapsed
+  if (state.status !== 'running' || state.startedAt === undefined) {
+    return state.accumulatedMs
   }
-  const startedAt = state.startedAt
-  if (!Number.isFinite(startedAt)) return 0
-  return Math.max(0, Date.now() - startedAt)
+  return state.accumulatedMs + Math.max(0, Date.now() - state.startedAt)
 }
 
 export function formatClock(ms: number): string {
