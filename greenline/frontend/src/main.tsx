@@ -7,7 +7,9 @@ import App from './App'
 import { AuthBridge, RouteGate, SignInPage } from './auth'
 import Landing from './pages/Landing'
 import Catalog from './pages/Catalog'
+import Profile from './pages/Profile'
 import { SolutionRoute, WorkspaceRoute } from './pages/KeyedRoutes'
+import { clerkAppearance } from './clerkAppearance'
 import './styles/globals.css'
 
 const router = createBrowserRouter([
@@ -21,6 +23,7 @@ const router = createBrowserRouter([
         element: <RouteGate />,
         children: [
           { path: 'challenges', element: <Catalog /> },
+          { path: 'profile', element: <Profile /> },
           { path: 'c/:slug', element: <WorkspaceRoute /> },
           { path: 'c/:slug/solution', element: <SolutionRoute /> },
         ],
@@ -32,7 +35,13 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? (
-      <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY}>
+      <ClerkProvider
+        publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY}
+        appearance={clerkAppearance}
+        signInUrl="/sign-in"
+        signInFallbackRedirectUrl="/challenges"
+        signUpFallbackRedirectUrl="/challenges"
+      >
         <AuthBridge />
         <RouterProvider router={router} />
       </ClerkProvider>

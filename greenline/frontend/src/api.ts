@@ -124,6 +124,11 @@ export interface LearnerPreferences {
   prep_path: PrepPath | null
 }
 
+export interface SolveActivity {
+  slug: string
+  solved_at: string
+}
+
 export interface Debrief {
   root_cause: string
   fix_reasoning: string
@@ -176,6 +181,10 @@ export function fileUrl(slug: string, path: string): string {
 export const api = {
   getPreferences: (opts?: FetchOpts) =>
     req<LearnerPreferences>('/api/me/preferences', { signal: opts?.signal }),
+  getSolveActivity: (opts?: FetchOpts) =>
+    req<{ solves: SolveActivity[] }>('/api/me/activity', { signal: opts?.signal }).then(
+      (data) => data.solves,
+    ),
   setPrepPath: (prepPath: PrepPath) =>
     req<LearnerPreferences>('/api/me/preferences', {
       method: 'PUT',

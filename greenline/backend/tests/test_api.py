@@ -160,6 +160,20 @@ def test_prep_path_and_visit_are_persisted(isolated_api: Path) -> None:
     assert client.post("/api/me/visits").json() == {"ok": True}
 
 
+def test_activity_returns_first_successful_run_per_challenge(
+    isolated_api: Path,
+) -> None:
+    progress.record_run("alpha", green=True, output="green")
+    progress.record_run("alpha", green=True, output="green again")
+    progress.record_run("beta", green=False, output="red")
+
+    response = TestClient(api.app).get("/api/me/activity")
+
+    assert response.status_code == 200
+    assert [solve["slug"] for solve in response.json()["solves"]] == ["alpha"]
+    assert response.json()["solves"][0]["solved_at"]
+
+
 def test_debrief_requires_a_solved_challenge_and_round_trips(
     isolated_api: Path,
 ) -> None:

@@ -767,6 +767,20 @@ def record_visit(request: Request) -> dict:
     return {"ok": True}
 
 
+@router.get("/api/me/activity")
+def get_solve_activity(request: Request) -> dict:
+    events = request_learner_state(request).list_product_events(
+        request_user_id(request)
+    )
+    return {
+        "solves": [
+            {"slug": event["slug"], "solved_at": event["occurred_at"]}
+            for event in events
+            if event["event_name"] == "successful_run" and event["slug"]
+        ]
+    }
+
+
 @router.get("/api/challenges/{slug}/debrief")
 def get_debrief(slug: str, request: Request) -> dict:
     try:
