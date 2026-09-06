@@ -16,7 +16,7 @@ env:
   REGISTRY_IMAGE: registry:3@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33
   TRIVY_IMAGE: aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
   SBOM_GENERATOR: docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
-  SKOPEO_IMAGE: quay.io/skopeo/stable:latest@sha256:2a0046b50fd80ef7a9e2e79587d800292ea7437c81d9cdc058b05448f8b1a999
+  SKOPEO_IMAGE: quay.io/skopeo/stable:latest@sha256:8d25aabcf965e267b6a6ad02ff8da5512f77de1490063625093ff564797e88bc
   VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
 
 jobs:
