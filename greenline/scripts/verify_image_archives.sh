@@ -7,14 +7,6 @@ set -eu
 : "${PYTHON_EXECUTION_IMAGE:=greenline-python-execution:ci}"
 : "${NODE_EXECUTION_IMAGE:=greenline-node-execution:ci}"
 
-active_container=
-cleanup() {
-    if [ -n "$active_container" ]; then
-        docker rm --force "$active_container" >/dev/null 2>&1 || true
-    fi
-}
-trap cleanup EXIT INT TERM
-
 case "$ARCHIVE_DIR" in
     /*) ;;
     *)
@@ -31,11 +23,19 @@ verify_archive() {
         echo "missing OCI archive: $archive" >&2
         exit 1
     fi
-    active_container=$(docker create "$image")
-    runtime_digest=$(docker inspect \
-        --format '{{.ImageManifestDescriptor.digest}}' "$active_container")
-    docker rm "$active_container" >/dev/null
-    active_container=
+    case "$image" in
+        *@sha256:*) runtime_digest=${image##*@} ;;
+        *)
+            echo "$component scanned image is not digest-pinned" >&2
+            exit 1
+            ;;
+    esac
+    runtime_hex=${runtime_digest#sha256:}
+    if [ "${#runtime_hex}" -ne 64 ] || \
+        printf '%s' "$runtime_hex" | grep -q '[^0-9a-f]'; then
+        echo "$component scanned image has an invalid digest" >&2
+        exit 1
+    fi
     index_digest=$(tar -xOf "$archive" index.json | jq -r '.manifests[0].digest')
     index_hex=${index_digest#sha256:}
     archive_digest=$(tar -xOf "$archive" "blobs/sha256/$index_hex" | jq -r '

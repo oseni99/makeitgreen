@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,25 @@ def _environment(tmp_path: Path) -> dict[str, str]:
     }
 
 
+def _write_oci_archive(path: Path, runtime_digest: str) -> None:
+    layout = path.parent / f"{path.stem}-layout"
+    index_digest = _digest(path.stem, "index")
+    index_hex = index_digest.removeprefix("sha256:")
+    index = {"manifests": [{"digest": index_digest}]}
+    manifest_index = {"manifests": [{"digest": runtime_digest}]}
+    (layout / "blobs" / "sha256").mkdir(parents=True)
+    (layout / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    (layout / "blobs" / "sha256" / index_hex).write_text(
+        json.dumps(manifest_index), encoding="utf-8"
+    )
+    with tarfile.open(path, "w") as archive:
+        archive.add(layout / "index.json", arcname="index.json")
+        archive.add(
+            layout / "blobs" / "sha256" / index_hex,
+            arcname=f"blobs/sha256/{index_hex}",
+        )
+
+
 def _fake_curl(tmp_path: Path) -> Path:
     executable = tmp_path / "curl"
     executable.write_text(
@@ -111,6 +131,68 @@ def _fake_curl(tmp_path: Path) -> Path:
     )
     executable.chmod(0o755)
     return executable
+
+
+def test_archive_verification_accepts_the_scanned_digest_refs(tmp_path: Path) -> None:
+    archive_dir = tmp_path / "archives"
+    archive_dir.mkdir()
+    environment = {**os.environ, "ARCHIVE_DIR": str(archive_dir)}
+    for component, variable in (
+        ("control-plane", "CONTROL_IMAGE"),
+        ("execution-worker", "WORKER_IMAGE"),
+        ("python-execution", "PYTHON_EXECUTION_IMAGE"),
+        ("node-execution", "NODE_EXECUTION_IMAGE"),
+    ):
+        digest = _digest(component)
+        _write_oci_archive(archive_dir / f"{component}.oci.tar", digest)
+        environment[variable] = f"127.0.0.1:5000/greenline-{component}@{digest}"
+
+    result = subprocess.run(
+        ["sh", str(SCRIPTS / "verify_image_archives.sh")],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_archive_verification_rejects_a_different_runtime_manifest(
+    tmp_path: Path,
+) -> None:
+    archive_dir = tmp_path / "archives"
+    archive_dir.mkdir()
+    environment = {**os.environ, "ARCHIVE_DIR": str(archive_dir)}
+    for component, variable in (
+        ("control-plane", "CONTROL_IMAGE"),
+        ("execution-worker", "WORKER_IMAGE"),
+        ("python-execution", "PYTHON_EXECUTION_IMAGE"),
+        ("node-execution", "NODE_EXECUTION_IMAGE"),
+    ):
+        _write_oci_archive(archive_dir / f"{component}.oci.tar", _digest(component))
+        runtime_digest = (
+            _digest(component, "different")
+            if component == "execution-worker"
+            else _digest(component)
+        )
+        environment[variable] = (
+            f"127.0.0.1:5000/greenline-{component}@{runtime_digest}"
+        )
+
+    result = subprocess.run(
+        ["sh", str(SCRIPTS / "verify_image_archives.sh")],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "execution-worker archive does not contain the scanned runtime manifest"
+        in result.stderr
+    )
 
 
 def test_publication_refuses_to_replace_an_existing_commit_tag(

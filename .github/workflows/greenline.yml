@@ -155,14 +155,36 @@ jobs:
           trap 'docker rm --force "$registry_name" >/dev/null 2>&1 || true' EXIT
           docker run --detach --name "$registry_name" \
             --publish 127.0.0.1:5000:5000 "$REGISTRY_IMAGE" >/dev/null
-          docker tag greenline-python-execution:ci 127.0.0.1:5000/greenline-python-execution:ci
-          docker tag greenline-node-execution:ci 127.0.0.1:5000/greenline-node-execution:ci
-          docker push 127.0.0.1:5000/greenline-python-execution:ci >/dev/null
-          docker push 127.0.0.1:5000/greenline-node-execution:ci >/dev/null
-          PYTHON_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' 127.0.0.1:5000/greenline-python-execution:ci)
-          NODE_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' 127.0.0.1:5000/greenline-node-execution:ci)
+          for component in control-plane execution-worker python-execution node-execution; do
+            docker tag "greenline-$component:ci" "127.0.0.1:5000/greenline-$component:ci"
+            docker push "127.0.0.1:5000/greenline-$component:ci" >/dev/null
+          done
+          resolve_runnable_ref() {
+            digest_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$1")
+            registry_digest=${digest_ref##*@}
+            runnable_digest=$(docker buildx imagetools inspect --raw "$digest_ref" | jq -r \
+              --arg registry_digest "$registry_digest" '
+                if (.manifests? | type) == "array" then
+                  [.manifests[] |
+                    select(.annotations["vnd.docker.reference.type"] != "attestation-manifest") |
+                    .digest] |
+                  if length == 1 then .[0] else error("expected one runnable manifest") end
+                else $registry_digest end
+              ')
+            printf '%s@%s\n' "${digest_ref%@*}" "$runnable_digest"
+          }
+          CONTROL_IMAGE_DIGEST_REF=$(resolve_runnable_ref 127.0.0.1:5000/greenline-control-plane:ci)
+          WORKER_IMAGE_DIGEST_REF=$(resolve_runnable_ref 127.0.0.1:5000/greenline-execution-worker:ci)
+          PYTHON_EXECUTION_IMAGE=$(resolve_runnable_ref 127.0.0.1:5000/greenline-python-execution:ci)
+          NODE_EXECUTION_IMAGE=$(resolve_runnable_ref 127.0.0.1:5000/greenline-node-execution:ci)
           export PYTHON_EXECUTION_IMAGE NODE_EXECUTION_IMAGE
           sh scripts/smoke_images.sh
+          {
+            echo "CONTROL_IMAGE_DIGEST_REF=$CONTROL_IMAGE_DIGEST_REF"
+            echo "WORKER_IMAGE_DIGEST_REF=$WORKER_IMAGE_DIGEST_REF"
+            echo "PYTHON_IMAGE_DIGEST_REF=$PYTHON_EXECUTION_IMAGE"
+            echo "NODE_IMAGE_DIGEST_REF=$NODE_EXECUTION_IMAGE"
+          } >> "$GITHUB_ENV"
 
       - name: Export SBOM and maximum-provenance OCI artifacts
         working-directory: greenline
@@ -205,6 +227,10 @@ jobs:
         working-directory: greenline
         env:
           ARCHIVE_DIR: ${{ github.workspace }}/greenline/supply-chain
+          CONTROL_IMAGE: ${{ env.CONTROL_IMAGE_DIGEST_REF }}
+          WORKER_IMAGE: ${{ env.WORKER_IMAGE_DIGEST_REF }}
+          PYTHON_EXECUTION_IMAGE: ${{ env.PYTHON_IMAGE_DIGEST_REF }}
+          NODE_EXECUTION_IMAGE: ${{ env.NODE_IMAGE_DIGEST_REF }}
         run: sh scripts/verify_image_archives.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
