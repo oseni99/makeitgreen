@@ -8,93 +8,11 @@ import {
   type PrepPath,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PREP_TRACKS } from '../prepPaths'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const FOCUS_STORAGE_KEY = 'greenline-prep-focus'
-
-const PREP_TRACKS = [
-  {
-    id: 'foundations',
-    name: 'Backend foundations',
-    description: 'Core backend patterns',
-    cadence: '6–8 sessions',
-    accent: 'bg-sticker-sky',
-    slugs: [
-      'wallet-service',
-      'return-workflow',
-      'config-merge',
-      'log-aggregator',
-      'ledger-api',
-      'token-auth-api',
-      'cache-ext',
-      'runbook-revisions',
-      'notification-dispatch-node',
-      'auth-tenant-leak',
-      'feature-flag-ext',
-    ],
-  },
-  {
-    id: 'distributed',
-    name: 'Distributed correctness',
-    description: 'Races, retries & consistency',
-    cadence: '6–8 sessions',
-    accent: 'bg-sticker-purple',
-    slugs: [
-      'orders-service',
-      'transfer-deadlock',
-      'rate-limiter',
-      'job-lease',
-      'invoice-delivery-worker',
-      'workspace-replica-router',
-      'invoice-cents-migration',
-      'digest-scheduler',
-      'device-command-webhook',
-    ],
-  },
-  {
-    id: 'debugging',
-    name: 'Production debugging',
-    description: 'Incidents, databases & runtimes',
-    cadence: '8–10 sessions',
-    accent: 'bg-sticker-orange',
-    slugs: [
-      'incident-alerts',
-      'queue-drain',
-      'deploy-crash',
-      'device-ingest-incident',
-      'audit-export-pool',
-      'thread-stall',
-      'build-stream-leak',
-      'topk-errors',
-      'enrichment-timeout-incident',
-      'audit-archive-stream',
-      'thumbnail-handoff',
-      'profile-search-projector',
-      'lab-sample-history',
-      'csv-import',
-      'retry-storm',
-      'gc-churn',
-      'cdc-slot',
-    ],
-  },
-  {
-    id: 'senior',
-    name: 'Senior mixed loop',
-    description: 'A realistic mock onsite',
-    cadence: '7 challenges',
-    accent: 'bg-sticker-green',
-    slugs: [
-      'pagination-api',
-      'subscription-renew',
-      'artifact-upload-ext',
-      'outbox-publish',
-      'build-stream-leak',
-      'vendor-catalog-reconcile',
-      'cdc-slot',
-    ],
-  },
-] as const
 
 type FocusId = PrepPath
 

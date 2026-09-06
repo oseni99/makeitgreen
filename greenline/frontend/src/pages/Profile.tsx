@@ -10,15 +10,9 @@ import {
   type SolveActivity,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PREP_PATH_NAMES, PREP_TRACKS } from '../prepPaths'
 import { buttonVariants } from '@/components/ui/button-variants'
 import { Button } from '@/components/ui/button'
-
-const PREP_PATH_NAMES = {
-  foundations: 'Backend foundations',
-  distributed: 'Distributed correctness',
-  debugging: 'Production debugging',
-  senior: 'Senior mixed loop',
-} as const
 
 function continueSlug(challenge: ChallengeMeta): string {
   const variants = challenge.variants ?? []
@@ -122,12 +116,19 @@ function ConfiguredProfile() {
   }
   if (!isSignedIn || !user) return <Navigate to="/sign-in" replace />
 
-  const next =
-    challenges.find((challenge) => challenge.progress.status === 'attempted') ??
-    challenges.find((challenge) => challenge.progress.status === 'todo')
   const name = user.fullName ?? user.firstName ?? 'Your profile'
   const email = user.primaryEmailAddress?.emailAddress ?? ''
   const prepPath = preferences.prep_path
+  const selectedTrack = PREP_TRACKS.find((track) => track.id === prepPath)
+  const recommendedChallenges = selectedTrack
+    ? selectedTrack.slugs.flatMap((slug) => {
+        const challenge = challenges.find((item) => item.slug === slug)
+        return challenge ? [challenge] : []
+      })
+    : challenges
+  const next =
+    recommendedChallenges.find((challenge) => challenge.progress.status === 'attempted') ??
+    recommendedChallenges.find((challenge) => challenge.progress.status === 'todo')
   const days = activityDays(activity)
 
   return (

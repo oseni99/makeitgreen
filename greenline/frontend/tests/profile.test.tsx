@@ -60,6 +60,17 @@ it('shows learner identity, progress, prep path, and the next challenge', async 
         return json({
           challenges: [
             {
+              slug: 'wallet-service',
+              title: 'wallet-service',
+              type: 'Repository Implementation',
+              difficulty: 'Easy',
+              minutes: 20,
+              language: 'Python',
+              blurb: 'Repair wallet invariants.',
+              brief: 'Keep balances valid.',
+              progress: { status: 'attempted', attempts: 1 },
+            },
+            {
               slug: 'orders-service',
               title: 'orders-service',
               type: 'Concurrency',
@@ -85,14 +96,14 @@ it('shows learner identity, progress, prep path, and the next challenge', async 
               ],
             },
             {
-              slug: 'wallet-service',
-              title: 'wallet-service',
-              type: 'Repository Implementation',
+              slug: 'config-merge',
+              title: 'config-merge',
+              type: 'Repository implementation',
               difficulty: 'Easy',
               minutes: 20,
               language: 'Python',
-              blurb: 'Repair wallet invariants.',
-              brief: 'Keep balances valid.',
+              blurb: 'Merge config safely.',
+              brief: 'Preserve explicit overrides.',
               progress: { status: 'solved', attempts: 2 },
             },
           ],
@@ -113,7 +124,7 @@ it('shows learner identity, progress, prep path, and the next challenge', async 
   const activity = screen.getByRole('group', { name: 'Daily solve activity' })
   expect(activity.children).toHaveLength(182)
   expect(screen.getByLabelText(/1 challenge solved/)).toBeTruthy()
-  expect(screen.getByText('1 solved · 1 in progress · 0 remaining')).toBeTruthy()
+  expect(screen.getByText('1 solved · 2 in progress · 0 remaining')).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Open challenge' }).getAttribute('href')).toBe(
     '/c/orders-service@javascript',
   )
