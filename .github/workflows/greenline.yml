@@ -121,12 +121,14 @@ jobs:
             --target execution-worker \
             --tag greenline-execution-worker:ci .
           docker buildx build --load \
+            --metadata-file "$RUNNER_TEMP/python-execution-build.json" \
             --build-arg PYTHON_BASE_IMAGE="$PYTHON_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
             --tag greenline-python-execution:ci \
             backend/execution-images/python
           docker buildx build --load \
+            --metadata-file "$RUNNER_TEMP/node-execution-build.json" \
             --build-arg NODE_BASE_IMAGE="$NODE_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
@@ -150,8 +152,10 @@ jobs:
           WORKER_IMAGE: greenline-execution-worker:ci
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
         run: |
-          PYTHON_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' greenline-python-execution:ci)
-          NODE_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' greenline-node-execution:ci)
+          PYTHON_EXECUTION_DIGEST=$(jq --raw-output '."containerimage.digest"' "$RUNNER_TEMP/python-execution-build.json")
+          NODE_EXECUTION_DIGEST=$(jq --raw-output '."containerimage.digest"' "$RUNNER_TEMP/node-execution-build.json")
+          PYTHON_EXECUTION_IMAGE="greenline-python-execution:ci@$PYTHON_EXECUTION_DIGEST"
+          NODE_EXECUTION_IMAGE="greenline-node-execution:ci@$NODE_EXECUTION_DIGEST"
           export PYTHON_EXECUTION_IMAGE NODE_EXECUTION_IMAGE
           sh scripts/smoke_images.sh
 
