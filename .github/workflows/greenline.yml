@@ -106,78 +106,87 @@ jobs:
       - name: Build runtime images for tests
         working-directory: greenline
         run: |
-          docker buildx build --load \
+          docker run --detach --name greenline-smoke-registry \
+            --publish 127.0.0.1:5000:5000 "$REGISTRY_IMAGE" >/dev/null
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:5000/v2/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              echo "loopback registry did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker buildx build --push \
             --build-arg NODE_BASE="$NODE_BASE" \
             --build-arg PYTHON_BASE="$PYTHON_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
             --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" \
             --target control-plane \
-            --tag greenline-control-plane:ci .
-          docker buildx build --load --file Dockerfile.worker \
+            --tag 127.0.0.1:5000/greenline-control-plane:ci .
+          docker buildx build --push --file Dockerfile.worker \
             --build-arg PYTHON_BASE="$WORKER_PYTHON_BASE" \
             --build-arg DOCKER_CLI_BASE="$DOCKER_CLI_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
             --target execution-worker \
-            --tag greenline-execution-worker:ci .
-          docker buildx build --load \
+            --tag 127.0.0.1:5000/greenline-execution-worker:ci .
+          docker buildx build --push \
             --build-arg PYTHON_BASE_IMAGE="$PYTHON_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
-            --tag greenline-python-execution:ci \
+            --tag 127.0.0.1:5000/greenline-python-execution:ci \
             backend/execution-images/python
-          docker buildx build --load \
+          docker buildx build --push \
             --build-arg NODE_BASE_IMAGE="$NODE_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
-            --tag greenline-node-execution:ci \
+            --tag 127.0.0.1:5000/greenline-node-execution:ci \
             backend/execution-images/node
+          for component in control-plane execution-worker python-execution node-execution; do
+            docker pull "127.0.0.1:5000/greenline-$component:ci" >/dev/null
+          done
 
       - name: Scan fixable high and critical vulnerabilities
         working-directory: greenline
         env:
-          CONTROL_IMAGE: greenline-control-plane:ci
-          WORKER_IMAGE: greenline-execution-worker:ci
-          PYTHON_EXECUTION_IMAGE: greenline-python-execution:ci
-          NODE_EXECUTION_IMAGE: greenline-node-execution:ci
+          CONTROL_IMAGE: 127.0.0.1:5000/greenline-control-plane:ci
+          WORKER_IMAGE: 127.0.0.1:5000/greenline-execution-worker:ci
+          PYTHON_EXECUTION_IMAGE: 127.0.0.1:5000/greenline-python-execution:ci
+          NODE_EXECUTION_IMAGE: 127.0.0.1:5000/greenline-node-execution:ci
           SBOM_DIR: ${{ github.workspace }}/greenline/supply-chain
         run: sh scripts/scan_images.sh
 
       - name: Smoke Hosted process roles
         working-directory: greenline
         env:
-          CONTROL_IMAGE: greenline-control-plane:ci
-          WORKER_IMAGE: greenline-execution-worker:ci
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
         run: |
-          registry_name="greenline-smoke-registry-$GITHUB_RUN_ID"
-          trap 'docker rm --force "$registry_name" >/dev/null 2>&1 || true' EXIT
-          docker run --detach --name "$registry_name" \
-            --publish 127.0.0.1:5000:5000 "$REGISTRY_IMAGE" >/dev/null
-          for component in control-plane execution-worker python-execution node-execution; do
-            docker tag "greenline-$component:ci" "127.0.0.1:5000/greenline-$component:ci"
-            docker push "127.0.0.1:5000/greenline-$component:ci" >/dev/null
-          done
           resolve_runnable_ref() {
-            digest_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$1")
-            registry_digest=${digest_ref##*@}
-            runnable_digest=$(docker buildx imagetools inspect --raw "$digest_ref" | jq -r \
-              --arg registry_digest "$registry_digest" '
+            manifest_file="$RUNNER_TEMP/$(printf '%s' "$1" | tr '/:' '__').json"
+            docker buildx imagetools inspect --raw "$1" > "$manifest_file"
+            runnable_digest=$(jq -r '
                 if (.manifests? | type) == "array" then
                   [.manifests[] |
                     select(.annotations["vnd.docker.reference.type"] != "attestation-manifest") |
                     .digest] |
                   if length == 1 then .[0] else error("expected one runnable manifest") end
-                else $registry_digest end
-              ')
-            printf '%s@%s\n' "${digest_ref%@*}" "$runnable_digest"
+                else empty end
+              ' "$manifest_file")
+            if [ -z "$runnable_digest" ]; then
+              runnable_digest="sha256:$(sha256sum "$manifest_file" | cut -d ' ' -f 1)"
+            fi
+            printf '%s@%s\n' "${1%:*}" "$runnable_digest"
           }
           CONTROL_IMAGE_DIGEST_REF=$(resolve_runnable_ref 127.0.0.1:5000/greenline-control-plane:ci)
           WORKER_IMAGE_DIGEST_REF=$(resolve_runnable_ref 127.0.0.1:5000/greenline-execution-worker:ci)
           PYTHON_EXECUTION_IMAGE=$(resolve_runnable_ref 127.0.0.1:5000/greenline-python-execution:ci)
           NODE_EXECUTION_IMAGE=$(resolve_runnable_ref 127.0.0.1:5000/greenline-node-execution:ci)
-          export PYTHON_EXECUTION_IMAGE NODE_EXECUTION_IMAGE
+          CONTROL_IMAGE=$CONTROL_IMAGE_DIGEST_REF
+          WORKER_IMAGE=$WORKER_IMAGE_DIGEST_REF
+          export CONTROL_IMAGE WORKER_IMAGE PYTHON_EXECUTION_IMAGE NODE_EXECUTION_IMAGE
           sh scripts/smoke_images.sh
           {
             echo "CONTROL_IMAGE_DIGEST_REF=$CONTROL_IMAGE_DIGEST_REF"
@@ -239,6 +248,10 @@ jobs:
           path: greenline/supply-chain/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Stop loopback registry
+        if: always()
+        run: docker rm --force greenline-smoke-registry >/dev/null 2>&1 || true
 
   publish-images:
     name: Publish immutable release images
