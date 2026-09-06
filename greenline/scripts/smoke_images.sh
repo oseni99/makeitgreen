@@ -40,11 +40,18 @@ docker run --detach \
     "$POSTGRES_IMAGE" >/dev/null
 
 attempt=0
-until docker exec "$postgres_name" pg_isready --username postgres --dbname greenline_ci >/dev/null 2>&1; do
+ready_checks=0
+while [ "$ready_checks" -lt 3 ]; do
     attempt=$((attempt + 1))
     if [ "$attempt" -ge 30 ]; then
         docker logs "$postgres_name"
         exit 1
+    fi
+    if docker exec "$postgres_name" \
+        pg_isready --username postgres --dbname greenline_ci >/dev/null 2>&1; then
+        ready_checks=$((ready_checks + 1))
+    else
+        ready_checks=0
     fi
     sleep 1
 done
