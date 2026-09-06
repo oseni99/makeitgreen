@@ -108,7 +108,7 @@ start_backend() {
     source .env.local
     set +a
     export GREENLINE_MODE=local
-    exec ./venv/bin/uvicorn app:app --host 127.0.0.1 --port "$BACKEND_PORT"
+    exec ./venv/bin/uvicorn app:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload
   ) >"$backend_log" 2>&1 &
   pid=$!
   started_pids+=("$pid")

@@ -68,7 +68,17 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function installServer({ failSecondFile = false, includeNewFile = false } = {}) {
+function installServer({
+  failSecondFile = false,
+  includeNewFile = false,
+  runResult = {},
+  streamBeforeComplete = false,
+}: {
+  failSecondFile?: boolean
+  includeNewFile?: boolean
+  runResult?: Record<string, unknown>
+  streamBeforeComplete?: boolean
+} = {}) {
   const saves: Array<{
     url: string
     content: string
@@ -79,6 +89,7 @@ function installServer({ failSecondFile = false, includeNewFile = false } = {}) 
     response: ReturnType<typeof deferred<Response>>
   }> = []
   let runNumber = 0
+  let jobPolls = 0
 
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -89,6 +100,15 @@ function installServer({ failSecondFile = false, includeNewFile = false } = {}) 
       return json({ job_id: `job-${runNumber}`, slug: 'orders-service', status: 'queued' })
     }
     if (url.startsWith('/api/run-jobs/')) {
+      if (streamBeforeComplete && jobPolls++ === 0) {
+        return json({
+          job_id: `job-${runNumber}`,
+          slug: 'orders-service',
+          status: 'running',
+          output: 'partial streamed output',
+          next_offset: 23,
+        })
+      }
       return json({
         job_id: `job-${runNumber}`,
         slug: 'orders-service',
@@ -104,6 +124,7 @@ function installServer({ failSecondFile = false, includeNewFile = false } = {}) 
           failed: 1,
           errors: 0,
           skipped: 0,
+          ...runResult,
         },
       })
     }
@@ -187,6 +208,138 @@ describe('workspace reliability', () => {
   it('binds the proxied development server only to IPv4 loopback', () => {
     expect(typeof viteConfig).toBe('object')
     expect(viteConfig.server?.host).toBe('127.0.0.1')
+  })
+
+  it('labels a collection failure as an error instead of a zero-test result', async () => {
+    installServer({
+      runResult: {
+        output: 'ERROR collecting tests/test_wallet.py\n1 error during collection',
+        passed: 0,
+        failed: 0,
+        errors: 1,
+      },
+    })
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+
+    expect(await screen.findByText('1 error')).toBeTruthy()
+    expect(screen.queryByText('0 failed · 0 passed')).toBeNull()
+  })
+
+  it('shows a first-test target followed by the authentic pytest output', async () => {
+    installServer({
+      runResult: {
+        output: [
+          '=================================== FAILURES ===================================',
+          '______________________ test_minimum_fee_is_one_cent ______________________',
+          '>       assert fee == 1',
+          'E       assert 0 == 1',
+          'tests/test_wallet.py:41: AssertionError',
+        ].join('\n'),
+        passed: 3,
+        failed: 1,
+        tests: [
+          {
+            id: 'tests/test_wallet.py::test_minimum_fee_is_one_cent',
+            outcome: 'failed',
+            duration_ms: 0.2,
+            file: 'tests/test_wallet.py',
+            line: 39,
+            message: 'AssertionError: expected minimum fee of 1 cent, got 0',
+            crash_file: 'tests/test_wallet.py',
+            crash_line: 41,
+          },
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+
+    expect(await screen.findByText(/Red is the starting line/)).toBeTruthy()
+    expect(screen.getByText('test_minimum_fee_is_one_cent')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'tests/test_wallet.py' })).toBeTruthy()
+    expect(screen.getByText(/Make that single test pass/)).toBeTruthy()
+    expect(screen.getByText(/assert 0 == 1/)).toBeTruthy()
+  })
+
+  it('replaces the streamed report so a completed run starts at the top', async () => {
+    installServer({
+      streamBeforeComplete: true,
+      runResult: {
+        output: 'failure report',
+        passed: 0,
+        failed: 1,
+        tests: [
+          {
+            id: 'tests/test_wallet.py::test_minimum_fee_is_one_cent',
+            outcome: 'failed',
+            duration_ms: 0.2,
+            file: 'tests/test_wallet.py',
+            line: 39,
+            message: 'assert 0 == 1',
+            crash_file: 'tests/test_wallet.py',
+            crash_line: 41,
+          },
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+    const streamingReport = await screen.findByLabelText('Test report')
+    expect(await screen.findByText(/partial streamed output/)).toBeTruthy()
+    streamingReport.scrollTop = 200
+
+    expect(await screen.findByText(/Red is the starting line/)).toBeTruthy()
+    const completedReport = screen.getByLabelText('Test report')
+    expect(completedReport).not.toBe(streamingReport)
+    expect(completedReport.scrollTop).toBe(0)
+  })
+
+  it('lets the learner drag and keyboard-resize the test-results drawer', async () => {
+    installServer()
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+    await user.click(screen.getByRole('button', { name: /run tests/i }))
+
+    const drawer = await screen.findByLabelText('Test output')
+    const handle = screen.getByRole('separator', { name: 'Resize test output' })
+    Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() })
+    Object.defineProperty(handle, 'releasePointerCapture', { value: vi.fn() })
+    vi.spyOn(drawer.parentElement!, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 1000,
+      bottom: 500,
+      left: 0,
+      width: 1000,
+      height: 500,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 300 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 200 })
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 200 })
+
+    expect(drawer.style.height).toBe('60%')
+    expect(handle.getAttribute('aria-valuenow')).toBe('60')
+
+    handle.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(drawer.style.height).toBe('55%')
+
+    await user.click(screen.getByRole('button', { name: /history/i }))
+    expect(screen.getByRole('separator', { name: 'Resize test output' })).toBeTruthy()
   })
 
   it('saves an edit made while save-all is in flight on the next run', async () => {

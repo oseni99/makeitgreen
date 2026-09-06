@@ -197,6 +197,22 @@ def _relative_to_repo(path_str: str, tmpdir: Path) -> str | None:
 
 def _tests_from_report(report: dict[str, Any], tmpdir: Path) -> list[dict[str, Any]]:
     tests: list[dict[str, Any]] = []
+    for collector in report.get("collectors", []):
+        if collector.get("outcome") != "failed":
+            continue
+        nodeid = collector.get("nodeid") or "Test collection"
+        tests.append(
+            {
+                "id": nodeid,
+                "outcome": "error",
+                "duration_ms": 0.0,
+                "file": nodeid if isinstance(nodeid, str) and nodeid.endswith(".py") else None,
+                "line": None,
+                "message": "Pytest could not collect this test module.",
+                "crash_file": None,
+                "crash_line": None,
+            }
+        )
     for t in report.get("tests", []):
         nodeid = t.get("nodeid", "")
         file = nodeid.split("::")[0] if "::" in nodeid else None
@@ -236,10 +252,15 @@ def _tests_from_report(report: dict[str, Any], tmpdir: Path) -> list[dict[str, A
 
 def _counts_from_report(report: dict[str, Any]) -> dict[str, int]:
     summary = report.get("summary", {})
+    collection_errors = sum(
+        1
+        for collector in report.get("collectors", [])
+        if collector.get("outcome") == "failed"
+    )
     return {
         "passed": summary.get("passed", 0),
         "failed": summary.get("failed", 0),
-        "errors": summary.get("error", 0),
+        "errors": summary.get("error", 0) + collection_errors,
         "skipped": summary.get("skipped", 0),
     }
 
@@ -305,9 +326,11 @@ def _runtime_command(
     command = runtime.get("command")
     if command is None:
         command = [
-            "{python}", "-m", "pytest", "-v", "--color=no",
-            "-p", "no:cacheprovider", "--json-report",
-            "{json_report}", "--json-report-omit", "collectors", "keywords",
+            "{python}", "-m", "pytest", "-q", "--no-header", "--color=no",
+            "-rN", "-p", "no:warnings", "-p", "no:cacheprovider",
+            "-p", "no:metadata", "--json-report",
+            "--json-report-verbosity=-1", "-o", "verbosity_test_cases=1",
+            "{json_report}", "--json-report-omit", "keywords",
             "streams", "log",
         ]
     if not isinstance(command, list) or not command or not all(

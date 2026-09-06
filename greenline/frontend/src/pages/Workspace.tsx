@@ -7,9 +7,9 @@ import {
   isAbortError,
   type ChallengeDetail,
   type RunHistoryEntry,
+  type RunMeta,
   type RunResult,
   type SearchHit,
-  type TestCase,
 } from '../api'
 import { LoadError } from '../components/LoadError'
 import { defineGreenlineTheme } from '../monacoTheme'
@@ -191,6 +191,16 @@ function formatSession(ms: number | null | undefined): string {
   return formatClock(ms)
 }
 
+function formatUnsuccessfulRun(
+  run: Pick<RunMeta, 'passed' | 'failed' | 'errors'>,
+): string {
+  const parts: string[] = []
+  if (run.errors) parts.push(`${run.errors} error${run.errors === 1 ? '' : 's'}`)
+  if (run.failed) parts.push(`${run.failed} failed`)
+  if (run.passed) parts.push(`${run.passed} passed`)
+  return parts.length ? parts.join(' · ') : 'No tests completed'
+}
+
 function HistoryRow({
   run,
   selected,
@@ -221,7 +231,7 @@ function HistoryRow({
       <span className="truncate text-foreground">
         {run.green
           ? `${run.passed} passed`
-          : `${run.failed} failed · ${run.passed} passed`}
+          : formatUnsuccessfulRun(run)}
       </span>
       <span className="hidden text-right text-muted-foreground sm:block" title="pytest wall time">
         {run.duration_ms}ms
@@ -241,54 +251,61 @@ function OutputLine({ line }: { line: string }) {
   return <span className={cls}>{line + '\n'}</span>
 }
 
-const OUTCOME_ICONS: Record<string, [string, string]> = {
-  passed: ['✓', 'text-success'],
-  failed: ['✗', 'text-destructive'],
-  error: ['⚠', 'text-destructive'],
-  skipped: ['○', 'text-muted-foreground'],
-  xfailed: ['○', 'text-muted-foreground'],
-  xpassed: ['✓', 'text-warning'],
-}
-
-function TestRow({
-  test,
+function RunGuidance({
+  result,
   onJump,
 }: {
-  test: TestCase
+  result: RunResult
   onJump: (file: string, line: number) => void
 }) {
-  const [icon, cls] = OUTCOME_ICONS[test.outcome] ?? ['?', 't-dim']
-  const failed = test.outcome === 'failed' || test.outcome === 'error'
-  // Prefer the crash site (often the source file) over the test definition.
-  const target =
-    test.crash_file && test.crash_line
-      ? { file: test.crash_file, line: test.crash_line }
-      : test.file && test.line
-        ? { file: test.file, line: test.line }
-        : null
+  if (result.green) {
+    return (
+      <div className="border-b border-console-success/20 px-4 py-4 text-sm text-console-success">
+        Every test is green. The challenge is solved.
+      </div>
+    )
+  }
+
+  const firstFailure = result.tests.find(
+    (test) => test.outcome === 'failed' || test.outcome === 'error',
+  )
+  if (!firstFailure) return null
+
+  const testName = firstFailure.id.split('::').at(-1) || firstFailure.id
+  const file = firstFailure.file || firstFailure.id.split('::')[0] || null
+  const jumpFile = firstFailure.crash_file || file
+  const jumpLine = firstFailure.crash_line || firstFailure.line
 
   return (
-    <div className="border-b px-4 py-3 last:border-b-0">
-      <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
-        <span className={cn('w-4 shrink-0 font-bold', cls)}>{icon}</span>
-        <span className={cn('min-w-0 flex-1 truncate', failed ? 'text-destructive' : 'text-foreground')}>{test.id}</span>
-        <span className="shrink-0 text-muted-foreground">{test.duration_ms.toFixed(1)}ms</span>
-        {target && (
+    <div className="border-b border-white/10 px-4 py-4 text-sm leading-6 text-console-foreground">
+      <p className="font-semibold text-console-success">
+        Red is the starting line — the repo ships with failing tests on purpose.
+      </p>
+      <p className="mt-2">
+        Start with this one:{' '}
+        <code className="text-console-warning">{testName}</code>
+      </p>
+      {file && (
+        jumpFile && jumpLine ? (
           <button
             type="button"
-            className="max-w-[45%] shrink-0 truncate rounded-md px-2 py-1 text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            title={`open ${target.file} at line ${target.line}`}
-            onClick={() => onJump(target.file, target.line)}
+            className="mt-1 block font-mono text-xs text-console-muted underline decoration-transparent underline-offset-4 hover:text-console-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title={`open ${jumpFile} at line ${jumpLine}`}
+            onClick={() => onJump(jumpFile, jumpLine)}
           >
-            {target.file}:{target.line} →
+            {file}
           </button>
-        )}
-      </div>
-      {failed && test.message && (
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/5 p-3 font-mono text-xs leading-5 text-destructive">
-          {test.message}
-        </pre>
+        ) : (
+          <div className="mt-1 font-mono text-xs text-console-muted">{file}</div>
+        )
       )}
+      <p className="mt-2 text-console-muted">
+        Make that single test pass, then run again. You don’t need to fix everything at once.
+      </p>
+      <p className="mt-3 border-t border-white/10 pt-3 text-console-success">
+        That’s your target — a failing test is the goal to beat, not a mistake. Read the failures
+        below, edit the source, and run again until every test is green.
+      </p>
     </div>
   )
 }
@@ -297,6 +314,10 @@ function shortName(path: string): string {
   const parts = path.split('/')
   return parts[parts.length - 1] || path
 }
+
+const OUTPUT_HEIGHT_MIN = 20
+const OUTPUT_HEIGHT_MAX = 80
+const OUTPUT_HEIGHT_DEFAULT = 40
 
 export default function Workspace() {
   const { slug = '' } = useParams()
@@ -312,8 +333,8 @@ export default function Workspace() {
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<RunResult | null>(null)
   const [outputOpen, setOutputOpen] = useState(false)
+  const [outputHeight, setOutputHeight] = useState(OUTPUT_HEIGHT_DEFAULT)
   const [timer, setTimer] = useState<TimerState | null>(null)
-  const [rawOpen, setRawOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<'results' | 'history'>('results')
   const [runs, setRuns] = useState<RunHistoryEntry[]>([])
   const [runsLoading, setRunsLoading] = useState(false)
@@ -337,6 +358,13 @@ export default function Workspace() {
   const searchRequestRef = useRef(0)
   const saveCurrentRef = useRef<() => Promise<void>>(async () => {})
   const skipUnsavedRef = useRef(false)
+  const outputSectionRef = useRef<HTMLElement | null>(null)
+  const outputResizeRef = useRef<{
+    pointerId: number
+    startY: number
+    startHeight: number
+    containerHeight: number
+  } | null>(null)
 
   const blocker = useBlocker(dirty.size > 0)
 
@@ -676,7 +704,6 @@ export default function Workspace() {
             errors: 0,
             skipped: 0,
           })
-          setRawOpen(true)
         }
         if (snapshot.status === 'failed') {
           throw new Error(snapshot.error || 'run job failed')
@@ -690,8 +717,6 @@ export default function Workspace() {
       }
       setResult(r)
       if (r.run?.id != null) setSelectedRunId(r.run.id)
-      // No structured results (timeout / collection crash) → raw log is the story.
-      setRawOpen(r.tests.length === 0)
       if (r.green) {
         setTimer((t) => (t ? stopTimer(slug, t, sessionMs) : t))
       }
@@ -721,7 +746,6 @@ export default function Workspace() {
         errors: 1,
         skipped: 0,
       })
-      setRawOpen(true)
     } finally {
       setRunning(false)
     }
@@ -800,7 +824,6 @@ export default function Workspace() {
       duration_ms: run.duration_ms,
       run,
     })
-    setRawOpen(run.tests.length === 0)
     setDrawerTab('results')
   }
 
@@ -1190,12 +1213,78 @@ export default function Workspace() {
           </div>
 
           <section
+            ref={outputSectionRef}
             className={cn(
-              'workspace-output shrink-0 overflow-hidden border-t bg-card transition-[height] duration-200',
-              outputOpen ? 'h-[40%] min-h-[180px]' : 'h-10',
+              'workspace-output relative shrink overflow-hidden border-t bg-card',
+              outputOpen ? 'min-h-[160px] max-h-[80%]' : 'h-10 transition-[height] duration-200',
             )}
+            style={outputOpen ? { height: `${outputHeight}%` } : undefined}
             aria-label="Test output"
           >
+            {outputOpen && (
+              <div
+                role="separator"
+                aria-label="Resize test output"
+                aria-orientation="horizontal"
+                aria-valuemin={OUTPUT_HEIGHT_MIN}
+                aria-valuemax={OUTPUT_HEIGHT_MAX}
+                aria-valuenow={Math.round(outputHeight)}
+                aria-valuetext={`${Math.round(outputHeight)} percent of the editor`}
+                tabIndex={0}
+                title="Drag to resize test output"
+                className="group absolute -top-1.5 left-0 z-20 flex h-3 w-full cursor-row-resize touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                onPointerDown={(event) => {
+                  const containerHeight =
+                    outputSectionRef.current?.parentElement?.getBoundingClientRect().height ||
+                    window.innerHeight
+                  outputResizeRef.current = {
+                    pointerId: event.pointerId,
+                    startY: event.clientY,
+                    startHeight: outputHeight,
+                    containerHeight,
+                  }
+                  event.currentTarget.setPointerCapture(event.pointerId)
+                }}
+                onPointerMove={(event) => {
+                  const resize = outputResizeRef.current
+                  if (!resize || resize.pointerId !== event.pointerId) return
+                  const delta = ((resize.startY - event.clientY) / resize.containerHeight) * 100
+                  setOutputHeight(Math.min(
+                    OUTPUT_HEIGHT_MAX,
+                    Math.max(OUTPUT_HEIGHT_MIN, resize.startHeight + delta),
+                  ))
+                }}
+                onPointerUp={(event) => {
+                  if (outputResizeRef.current?.pointerId !== event.pointerId) return
+                  outputResizeRef.current = null
+                  event.currentTarget.releasePointerCapture(event.pointerId)
+                }}
+                onPointerCancel={() => {
+                  outputResizeRef.current = null
+                }}
+                onLostPointerCapture={() => {
+                  outputResizeRef.current = null
+                }}
+                onDoubleClick={() => setOutputHeight(OUTPUT_HEIGHT_DEFAULT)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    setOutputHeight((height) => Math.min(OUTPUT_HEIGHT_MAX, height + 5))
+                  } else if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    setOutputHeight((height) => Math.max(OUTPUT_HEIGHT_MIN, height - 5))
+                  } else if (event.key === 'Home') {
+                    event.preventDefault()
+                    setOutputHeight(OUTPUT_HEIGHT_MIN)
+                  } else if (event.key === 'End') {
+                    event.preventDefault()
+                    setOutputHeight(OUTPUT_HEIGHT_MAX)
+                  }
+                }}
+              >
+                <span className="h-0.5 w-12 rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+              </div>
+            )}
             <div className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
               <button
                 type="button"
@@ -1239,7 +1328,7 @@ export default function Workspace() {
                 )}>
                   {result.green
                     ? `ALL GREEN — ${result.passed} passed`
-                    : `${result.failed} failed · ${result.passed} passed${result.errors ? ` · ${result.errors} errors` : ''}`}
+                    : formatUnsuccessfulRun(result)}
                 </span>
               )}
               {running && <span className="ml-2 animate-spin text-muted-foreground">◜</span>}
@@ -1269,50 +1358,30 @@ export default function Workspace() {
                     ))
                   )}
                 </div>
-              ) : result && result.tests.length > 0 ? (
-                <div className="h-[calc(100%_-_2.5rem)] overflow-auto">
-                  {result.output_truncated && (
-                    <div className="border-b border-warning/20 bg-warning/10 px-4 py-2 text-xs text-warning">
-                      output truncated — showing the last 20,000 characters
-                    </div>
-                  )}
-                  <div>
-                    {result.tests.map((t) => (
-                      <TestRow key={t.id} test={t} onJump={jumpTo} />
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="w-full border-y bg-muted/50 px-4 py-2 text-left font-mono text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    onClick={() => setRawOpen((o) => !o)}
-                  >
-                    {rawOpen ? '▾' : '▸'} raw pytest output
-                  </button>
-                  {rawOpen && (
-                    <pre className="m-0 max-h-64 overflow-auto bg-console p-4 font-mono text-xs leading-5 text-console-foreground">
-                      {result.output.split('\n').map((l, i) => (
-                        <OutputLine key={i} line={l} />
-                      ))}
-                    </pre>
-                  )}
-                </div>
               ) : (
-                <div className="h-[calc(100%_-_2.5rem)] overflow-auto bg-console p-4 font-mono text-xs leading-5 text-console-foreground">
+                <div
+                  key={result?.run?.id != null ? `run-${result.run.id}` : running ? 'running' : 'result'}
+                  aria-label="Test report"
+                  className="h-[calc(100%_-_2.5rem)] overflow-auto bg-console [overflow-anchor:none] [scrollbar-gutter:stable]"
+                >
                   {result ? (
                     <>
+                      <RunGuidance result={result} onJump={jumpTo} />
                       {result.output_truncated && (
-                        <div className="mb-3 rounded-md bg-console-warning/10 px-3 py-2 text-console-warning">
+                        <div className="border-b border-console-warning/20 bg-console-warning/10 px-4 py-2 text-xs text-console-warning">
                           output truncated — showing the last 20,000 characters
                         </div>
                       )}
-                      {result.output.split('\n').map((l, i) => (
-                        <OutputLine key={i} line={l} />
-                      ))}
+                      <pre className="m-0 whitespace-pre-wrap p-4 font-mono text-xs leading-5 text-console-foreground">
+                        {result.output.split('\n').map((l, i) => (
+                          <OutputLine key={i} line={l} />
+                        ))}
+                      </pre>
                     </>
                   ) : (
-                    <span className="text-console-muted">
+                    <div className="p-4 font-mono text-xs text-console-muted">
                       {running ? 'running pytest in sandbox…' : 'hit ▶ Run tests to execute the suite'}
-                    </span>
+                    </div>
                   )}
                 </div>
               ))}

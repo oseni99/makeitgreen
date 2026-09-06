@@ -59,6 +59,12 @@ def test_structured_results_report_per_test_outcomes(
 
     assert result["passed"] == 1
     assert result["failed"] == 1
+    assert "FAILURES" in result["output"]
+    assert "test session starts" not in result["output"]
+    assert "rootdir:" not in result["output"]
+    assert "JSON report" not in result["output"]
+    assert "short test summary info" not in result["output"]
+    assert str(tmp_path) not in result["output"]
     by_id = {t["id"]: t for t in result["tests"]}
     assert by_id["tests/test_lib.py::test_passes"]["outcome"] == "passed"
 
@@ -178,6 +184,29 @@ def test_no_tests_collected_is_deterministic(
     assert result["tests"] == []
 
 
+def test_collection_error_is_reported_as_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tiny_repo(
+        tmp_path,
+        monkeypatch,
+        "from missing_module import unavailable\n\n"
+        "def test_never_collected():\n"
+        "    assert unavailable\n",
+    )
+
+    result = _execute("collection-error")
+
+    assert result["exit_code"] != 0
+    assert result["green"] is False
+    assert result["passed"] == 0
+    assert result["failed"] == 0
+    assert result["errors"] == 1
+    assert len(result["tests"]) == 1
+    collection_error = result["tests"][0]
+    assert collection_error["outcome"] == "error"
+
+
 def test_stdout_and_stderr_appear_in_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -195,6 +224,28 @@ def test_stdout_and_stderr_appear_in_output(
 
     assert "STDOUT_MARKER_GL" in result["output"]
     assert "STDERR_MARKER_GL" in result["output"]
+
+
+def test_dependency_warnings_do_not_pollute_learner_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tiny_repo(
+        tmp_path,
+        monkeypatch,
+        "import warnings\n\n"
+        "def test_dependency_warning():\n"
+        "    warnings.warn('dependency warning noise', DeprecationWarning)\n\n"
+        "def test_failure_stays_clear():\n"
+        "    assert False\n",
+    )
+
+    result = _execute("warning-noise")
+
+    assert result["passed"] == 1
+    assert result["failed"] == 1
+    assert "dependency warning noise" not in result["output"]
+    assert "warnings summary" not in result["output"]
+    assert "1 warning" not in result["output"]
 
 
 def test_output_truncated_to_last_20000_chars(
