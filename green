@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+
+set -u
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$ROOT_DIR/greenline"
+BACKEND_DIR="$APP_DIR/backend"
+FRONTEND_DIR="$APP_DIR/frontend"
+STATE_DIR="${GREEN_STATE_DIR:-$BACKEND_DIR/data/dev-server}"
+BACKEND_PORT="${GREEN_BACKEND_PORT:-8000}"
+FRONTEND_PORT="${GREEN_FRONTEND_PORT:-5173}"
+
+backend_pid_file="$STATE_DIR/backend.pid"
+frontend_pid_file="$STATE_DIR/frontend.pid"
+backend_log="$STATE_DIR/backend.log"
+frontend_log="$STATE_DIR/frontend.log"
+started_pids=()
+
+usage() {
+  cat <<'EOF'
+Usage: ./green <command>
+
+Commands:
+  start     Start the frontend and backend
+  stop      Stop services started by this script
+  restart   Restart both services
+  status    Show service status and local URLs
+  logs      Follow frontend and backend logs
+EOF
+}
+
+read_pid() {
+  local pid_file="$1"
+  if [[ -f "$pid_file" ]]; then
+    tr -d '[:space:]' < "$pid_file"
+  fi
+}
+
+managed_pid() {
+  local pid_file="$1"
+  local pid
+  pid="$(read_pid "$pid_file")"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    printf '%s' "$pid"
+    return 0
+  fi
+  return 1
+}
+
+port_in_use() {
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+require_file() {
+  if [[ ! -f "$1" ]]; then
+    echo "Missing required file: $1" >&2
+    exit 1
+  fi
+}
+
+wait_for_url() {
+  local name="$1"
+  local url="$2"
+  local pid="$3"
+  local log="$4"
+
+  for _ in {1..50}; do
+    if curl --fail --silent --output /dev/null "$url"; then
+      echo "$name ready: $url"
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "$name exited during startup. Recent log output:" >&2
+      tail -n 20 "$log" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  echo "$name did not become ready at $url. Recent log output:" >&2
+  tail -n 20 "$log" >&2
+  return 1
+}
+
+start_backend() {
+  local pid
+  if pid="$(managed_pid "$backend_pid_file")"; then
+    echo "Backend already running (PID $pid)"
+    return 0
+  fi
+  if port_in_use "$BACKEND_PORT"; then
+    if curl --fail --silent --output /dev/null "http://127.0.0.1:$BACKEND_PORT/health/live"; then
+      echo "Backend already running (external process on port $BACKEND_PORT)"
+      return 0
+    fi
+    echo "Cannot start backend: port $BACKEND_PORT is already in use by another process." >&2
+    return 1
+  fi
+
+  require_file "$BACKEND_DIR/.env.local"
+  require_file "$BACKEND_DIR/venv/bin/uvicorn"
+  mkdir -p "$STATE_DIR"
+
+  (
+    cd "$BACKEND_DIR" || exit 1
+    set -a
+    # shellcheck disable=SC1091
+    source .env.local
+    set +a
+    export GREENLINE_MODE=local
+    exec ./venv/bin/uvicorn app:app --host 127.0.0.1 --port "$BACKEND_PORT"
+  ) >"$backend_log" 2>&1 &
+  pid=$!
+  started_pids+=("$pid")
+  printf '%s\n' "$pid" > "$backend_pid_file"
+  wait_for_url "Backend" "http://127.0.0.1:$BACKEND_PORT/health/live" "$pid" "$backend_log"
+}
+
+start_frontend() {
+  local pid
+  if pid="$(managed_pid "$frontend_pid_file")"; then
+    echo "Frontend already running (PID $pid)"
+    return 0
+  fi
+  if port_in_use "$FRONTEND_PORT"; then
+    if curl --fail --silent --output /dev/null "http://127.0.0.1:$FRONTEND_PORT/"; then
+      echo "Frontend already running (external process on port $FRONTEND_PORT)"
+      return 0
+    fi
+    echo "Cannot start frontend: port $FRONTEND_PORT is already in use by another process." >&2
+    return 1
+  fi
+
+  require_file "$FRONTEND_DIR/node_modules/.bin/vite"
+  mkdir -p "$STATE_DIR"
+
+  (
+    cd "$FRONTEND_DIR" || exit 1
+    exec ./node_modules/.bin/vite --host 127.0.0.1 --port "$FRONTEND_PORT"
+  ) >"$frontend_log" 2>&1 &
+  pid=$!
+  started_pids+=("$pid")
+  printf '%s\n' "$pid" > "$frontend_pid_file"
+  wait_for_url "Frontend" "http://127.0.0.1:$FRONTEND_PORT/" "$pid" "$frontend_log"
+}
+
+start() {
+  local failed=0
+  start_backend || failed=1
+  start_frontend || failed=1
+  if (( failed )); then
+    return 1
+  fi
+  echo "MakeItGreen: http://127.0.0.1:$FRONTEND_PORT"
+  if (( ${#started_pids[@]} > 0 )); then
+    echo "Press Ctrl+C to stop the services started by this command."
+    trap 'exit 0' INT TERM
+    trap stop EXIT
+    while true; do
+      local running=0
+      local pid
+      for pid in "${started_pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+          running=1
+        fi
+      done
+      if (( ! running )); then
+        break
+      fi
+      sleep 1
+    done
+  fi
+}
+
+stop_service() {
+  local name="$1"
+  local pid_file="$2"
+  local pid
+  if ! pid="$(managed_pid "$pid_file")"; then
+    rm -f "$pid_file"
+    echo "$name is not managed by ./green"
+    return 0
+  fi
+
+  kill "$pid"
+  for _ in {1..30}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$pid_file"
+      echo "$name stopped"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$name is still stopping (PID $pid)" >&2
+  return 1
+}
+
+stop() {
+  local failed=0
+  stop_service "Frontend" "$frontend_pid_file" || failed=1
+  stop_service "Backend" "$backend_pid_file" || failed=1
+  return "$failed"
+}
+
+service_status() {
+  local name="$1"
+  local pid_file="$2"
+  local port="$3"
+  local pid
+  if pid="$(managed_pid "$pid_file")"; then
+    echo "$name: running (PID $pid, managed, port $port)"
+  elif port_in_use "$port"; then
+    echo "$name: running (external process, port $port)"
+  else
+    echo "$name: stopped"
+  fi
+}
+
+status() {
+  service_status "Backend" "$backend_pid_file" "$BACKEND_PORT"
+  service_status "Frontend" "$frontend_pid_file" "$FRONTEND_PORT"
+}
+
+logs() {
+  mkdir -p "$STATE_DIR"
+  touch "$backend_log" "$frontend_log"
+  tail -n 40 -f "$backend_log" "$frontend_log"
+}
+
+case "${1:-}" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  status)
+    status
+    ;;
+  logs)
+    logs
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

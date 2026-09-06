@@ -60,6 +60,21 @@ the image contract.
 
 ## Run it
 
+From the repository root, start both development servers with one command:
+
+```bash
+./green start
+```
+
+The launcher serves the frontend at `http://127.0.0.1:5173`, starts the API on
+port 8000, loads `backend/.env.local`, and keeps logs and PID files under the
+ignored `backend/data/dev-server/` directory. Use `./green status`,
+`./green logs`, `./green restart`, or `./green stop` to manage the stack. The
+start command stays in the foreground; press Ctrl+C to stop the services it
+started.
+
+The equivalent manual commands are:
+
 ```bash
 # backend (port 8000)
 cd backend
