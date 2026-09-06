@@ -13,6 +13,7 @@ env:
   WORKER_PYTHON_BASE: python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
   DOCKER_CLI_BASE: docker:29-cli@sha256:3f4743208d2338c934d7b8bcfbe1bb54c0b2355c510ad5e0f31c0c4a54bd704e
   POSTGRES_IMAGE: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+  REGISTRY_IMAGE: registry:3@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33
   TRIVY_IMAGE: aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
   SBOM_GENERATOR: docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
   SKOPEO_IMAGE: quay.io/skopeo/stable:latest@sha256:2a0046b50fd80ef7a9e2e79587d800292ea7437c81d9cdc058b05448f8b1a999
@@ -121,14 +122,12 @@ jobs:
             --target execution-worker \
             --tag greenline-execution-worker:ci .
           docker buildx build --load \
-            --metadata-file "$RUNNER_TEMP/python-execution-build.json" \
             --build-arg PYTHON_BASE_IMAGE="$PYTHON_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
             --tag greenline-python-execution:ci \
             backend/execution-images/python
           docker buildx build --load \
-            --metadata-file "$RUNNER_TEMP/node-execution-build.json" \
             --build-arg NODE_BASE_IMAGE="$NODE_BASE" \
             --build-arg SOURCE_URL="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" \
@@ -152,10 +151,16 @@ jobs:
           WORKER_IMAGE: greenline-execution-worker:ci
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
         run: |
-          PYTHON_EXECUTION_DIGEST=$(jq --raw-output '."containerimage.digest"' "$RUNNER_TEMP/python-execution-build.json")
-          NODE_EXECUTION_DIGEST=$(jq --raw-output '."containerimage.digest"' "$RUNNER_TEMP/node-execution-build.json")
-          PYTHON_EXECUTION_IMAGE="greenline-python-execution:ci@$PYTHON_EXECUTION_DIGEST"
-          NODE_EXECUTION_IMAGE="greenline-node-execution:ci@$NODE_EXECUTION_DIGEST"
+          registry_name="greenline-smoke-registry-$GITHUB_RUN_ID"
+          trap 'docker rm --force "$registry_name" >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name "$registry_name" \
+            --publish 127.0.0.1:5000:5000 "$REGISTRY_IMAGE" >/dev/null
+          docker tag greenline-python-execution:ci 127.0.0.1:5000/greenline-python-execution:ci
+          docker tag greenline-node-execution:ci 127.0.0.1:5000/greenline-node-execution:ci
+          docker push 127.0.0.1:5000/greenline-python-execution:ci >/dev/null
+          docker push 127.0.0.1:5000/greenline-node-execution:ci >/dev/null
+          PYTHON_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' 127.0.0.1:5000/greenline-python-execution:ci)
+          NODE_EXECUTION_IMAGE=$(docker image inspect --format '{{index .RepoDigests 0}}' 127.0.0.1:5000/greenline-node-execution:ci)
           export PYTHON_EXECUTION_IMAGE NODE_EXECUTION_IMAGE
           sh scripts/smoke_images.sh
 
