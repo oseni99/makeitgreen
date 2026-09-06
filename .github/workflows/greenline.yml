@@ -314,62 +314,85 @@ jobs:
             > "$OUTPUT_DIR/release-manifest.json"
 
       - name: Attest control-plane provenance
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-control-plane
           subject-digest: ${{ steps.publish.outputs.control_plane_digest }}
           push-to-registry: true
+          create-storage-record: false
       - name: Attest control-plane SBOM
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-control-plane
           subject-digest: ${{ steps.publish.outputs.control_plane_digest }}
           sbom-path: supply-chain/control-plane.spdx.json
           push-to-registry: true
+          create-storage-record: false
       - name: Attest execution-worker provenance
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-execution-worker
           subject-digest: ${{ steps.publish.outputs.execution_worker_digest }}
           push-to-registry: true
+          create-storage-record: false
       - name: Attest execution-worker SBOM
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-execution-worker
           subject-digest: ${{ steps.publish.outputs.execution_worker_digest }}
           sbom-path: supply-chain/execution-worker.spdx.json
           push-to-registry: true
+          create-storage-record: false
       - name: Attest Python execution provenance
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-python-execution
           subject-digest: ${{ steps.publish.outputs.python_execution_digest }}
           push-to-registry: true
+          create-storage-record: false
       - name: Attest Python execution SBOM
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-python-execution
           subject-digest: ${{ steps.publish.outputs.python_execution_digest }}
           sbom-path: supply-chain/python-execution.spdx.json
           push-to-registry: true
+          create-storage-record: false
       - name: Attest Node execution provenance
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-node-execution
           subject-digest: ${{ steps.publish.outputs.node_execution_digest }}
           push-to-registry: true
+          create-storage-record: false
       - name: Attest Node execution SBOM
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ steps.publish.outputs.registry_root }}-node-execution
           subject-digest: ${{ steps.publish.outputs.node_execution_digest }}
           sbom-path: supply-chain/node-execution.spdx.json
           push-to-registry: true
+          create-storage-record: false
 
       - name: Attest release manifest
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: ${{ runner.temp }}/greenline-release/release-manifest.json
+          create-storage-record: false
+
+      - name: Note private repository attestation limitation
+        if: github.event.repository.visibility != 'public'
+        run: |
+          echo "::notice::GitHub-signed attestations require a public repository or GitHub Enterprise Cloud. The published OCI indexes still include the verified BuildKit SBOM and maximum-provenance attestations."
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
