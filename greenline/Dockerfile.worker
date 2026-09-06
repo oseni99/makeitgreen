@@ -24,6 +24,7 @@ RUN /opt/greenline-venv/bin/pip install --requirement /tmp/requirements-worker.t
 FROM ${PYTHON_BASE} AS execution-worker
 ARG SOURCE_URL
 ARG SOURCE_REVISION
+RUN apk --no-cache upgrade libuuid
 LABEL org.opencontainers.image.source=${SOURCE_URL} \
     org.opencontainers.image.revision=${SOURCE_REVISION}
 ENV PATH=/opt/greenline-venv/bin:$PATH \
