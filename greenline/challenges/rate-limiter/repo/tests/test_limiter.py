@@ -61,19 +61,24 @@ def test_rejects_invalid_configuration_and_tenant() -> None:
         RateLimiter(limit=1, window_seconds=10, clock=clock).allow("")
 
 
-def test_tenants_have_independent_allowances() -> None:
-    limiter = RateLimiter(limit=1, window_seconds=60, clock=Clock())
+@pytest.mark.parametrize("limit", [1, 2, 3, 4, 5])
+def test_tenants_have_independent_allowances(limit: int) -> None:
+    limiter = RateLimiter(limit=limit, window_seconds=60, clock=Clock())
 
-    assert limiter.allow("noisy") is True
+    for _ in range(limit):
+        assert limiter.allow("noisy") is True
     assert limiter.allow("quiet") is True
     assert limiter.allow("noisy") is False
 
 
-def test_concurrent_decision_never_exceeds_limit() -> None:
-    workers = 6
+@pytest.mark.parametrize(
+    ("workers", "limit"),
+    [(3, 1), (4, 1), (4, 2), (6, 2), (8, 3)],
+)
+def test_concurrent_decision_never_exceeds_limit(workers: int, limit: int) -> None:
     gate = threading.Barrier(workers)
     limiter = RateLimiter(
-        limit=2,
+        limit=limit,
         window_seconds=60,
         clock=Clock(),
         decision_gate=gate,
@@ -95,16 +100,22 @@ def test_concurrent_decision_never_exceeds_limit() -> None:
 
     assert errors == []
     assert all(not thread.is_alive() for thread in threads)
-    assert results.count(True) == 2
-    assert results.count(False) == workers - 2
+    assert results.count(True) == limit
+    assert results.count(False) == workers - limit
 
 
-def test_timestamps_are_sampled_in_atomic_admission_order() -> None:
+@pytest.mark.parametrize(
+    ("timestamps", "window_seconds"),
+    [([100.0, 105.0, 111.0], 10), ([0.0, 4.0, 6.0], 5), ([20.0, 29.0, 31.0], 10)],
+)
+def test_timestamps_are_sampled_in_atomic_admission_order(
+    timestamps: list[float], window_seconds: float
+) -> None:
     gate = ReverseArrivalGate()
-    clock = SequenceClock([100.0, 105.0, 111.0])
+    clock = SequenceClock(timestamps)
     limiter = RateLimiter(
         limit=2,
-        window_seconds=10,
+        window_seconds=window_seconds,
         clock=clock,
         decision_gate=gate,  # type: ignore[arg-type]
     )

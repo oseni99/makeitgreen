@@ -33,22 +33,44 @@ test('rejects malformed cursors', () => {
   assert.throws(() => pager.page({ limit: 1, cursor: 'not-a-valid-cursor' }), /invalid cursor/)
 })
 
-test('uses ID as the deterministic equal-time tie-breaker', () => {
-  const at = new Date(BASE)
-  const pager = new EventPager(new EventStore([event(2, at), event(3, at), event(1, at)]))
-  assert.deepEqual(ids(pager.page({ limit: 10 })), ['evt-3', 'evt-2', 'evt-1'])
-})
+for (const inputOrder of [
+  [2, 3, 1],
+  [1, 2, 3],
+  [4, 1, 3, 2],
+  [2, 4, 1, 3],
+  [1, 5, 2, 4, 3],
+  [3, 1, 5, 2, 4],
+]) {
+  test(`uses ID as the equal-time tie-breaker for ${inputOrder.join('-')}`, () => {
+    const at = new Date(BASE)
+    const pager = new EventPager(
+      new EventStore(inputOrder.map((number) => event(number, at))),
+    )
+    const expected = [...inputOrder]
+      .sort((left, right) => right - left)
+      .map((number) => `evt-${number}`)
+    assert.deepEqual(ids(pager.page({ limit: 10 })), expected)
+  })
+}
 
-test('new head inserts do not shift the remaining traversal', () => {
-  const store = new EventStore([1, 2, 3, 4, 5].map((number) => event(number)))
-  const pager = new EventPager(store)
-  const first = pager.page({ limit: 2 })
-  assert.deepEqual(ids(first), ['evt-5', 'evt-4'])
+for (const [total, limit] of [[5, 1], [5, 2], [7, 2], [7, 3], [9, 3], [10, 4]]) {
+  test(`new head inserts preserve traversal with ${total} events and pages of ${limit}`, () => {
+    const store = new EventStore(
+      Array.from({ length: total }, (_, index) => event(index + 1)),
+    )
+    const pager = new EventPager(store)
+    const first = pager.page({ limit })
+    const seen = ids(first)
 
-  store.add(event(6))
-  const second = pager.page({ limit: 2, cursor: first.nextCursor })
-  const third = pager.page({ limit: 2, cursor: second.nextCursor })
-  assert.deepEqual(ids(second), ['evt-3', 'evt-2'])
-  assert.deepEqual(ids(third), ['evt-1'])
-  assert.equal(third.nextCursor, null)
-})
+    store.add(event(total + 1))
+    let cursor = first.nextCursor
+    while (cursor !== null) {
+      const page = pager.page({ limit, cursor })
+      seen.push(...ids(page))
+      cursor = page.nextCursor
+    }
+
+    const expected = Array.from({ length: total }, (_, index) => `evt-${total - index}`)
+    assert.deepEqual(seen, expected)
+  })
+}

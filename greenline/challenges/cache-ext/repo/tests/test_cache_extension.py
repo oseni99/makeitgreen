@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from catalog.models import Product
 from catalog.repository import ProductRepository
 
@@ -22,66 +24,80 @@ def _cache_cls():
     return TTLCache
 
 
-def test_ttl_cache_expires_at_boundary_without_sleeping() -> None:
+@pytest.mark.parametrize("ttl", [0.1, 1, 10])
+def test_ttl_cache_expires_at_boundary_without_sleeping(ttl: float) -> None:
     clock = FakeClock()
-    cache = _cache_cls()(ttl_seconds=10, clock=clock)
+    cache = _cache_cls()(ttl_seconds=ttl, clock=clock)
     cache.set("sku", "value")
 
     assert cache.get("sku") == "value"
-    clock.advance(9.999)
+    clock.advance(ttl - 0.001)
     assert cache.get("sku") == "value"
     clock.advance(0.001)
     assert cache.get("sku") is None
 
 
-def test_repeated_repository_read_hits_storage_once_before_expiry() -> None:
+@pytest.mark.parametrize("read_count", [2, 5])
+def test_repeated_repository_read_hits_storage_once_before_expiry(
+    read_count: int,
+) -> None:
     clock = FakeClock()
     cache = _cache_cls()(ttl_seconds=10, clock=clock)
     repo = ProductRepository(cache=cache)
     product = Product("sku", "Cached", 100)
     repo.save(product)
 
-    assert repo.get("sku") == product
-    assert repo.get("sku") == product
+    for _ in range(read_count):
+        assert repo.get("sku") == product
     assert repo.storage_reads == 1
 
 
-def test_expired_entry_is_refreshed_from_storage() -> None:
+@pytest.mark.parametrize("ttl", [1, 5])
+def test_expired_entry_is_refreshed_from_storage(ttl: float) -> None:
     clock = FakeClock()
-    cache = _cache_cls()(ttl_seconds=5, clock=clock)
+    cache = _cache_cls()(ttl_seconds=ttl, clock=clock)
     repo = ProductRepository(cache=cache)
     repo.save(Product("sku", "Cached", 100))
 
     repo.get("sku")
-    clock.advance(5)
+    clock.advance(ttl)
     assert repo.get("sku") == Product("sku", "Cached", 100)
     assert repo.storage_reads == 2
 
 
-def test_save_invalidates_cached_product() -> None:
+@pytest.mark.parametrize("new_price", [125, 999])
+def test_save_invalidates_cached_product(new_price: int) -> None:
     clock = FakeClock()
     cache = _cache_cls()(ttl_seconds=60, clock=clock)
     repo = ProductRepository(cache=cache)
     repo.save(Product("sku", "Old", 100))
     assert repo.get("sku").name == "Old"
 
-    repo.save(Product("sku", "New", 125))
+    repo.save(Product("sku", "New", new_price))
 
-    assert repo.get("sku") == Product("sku", "New", 125)
+    assert repo.get("sku") == Product("sku", "New", new_price)
     assert repo.storage_reads == 2
 
 
-def test_delete_invalidates_cached_product_without_touching_other_keys() -> None:
+@pytest.mark.parametrize("deleted_sku", ["a", "b", "c"])
+def test_delete_invalidates_cached_product_without_touching_other_keys(
+    deleted_sku: str,
+) -> None:
     clock = FakeClock()
     cache = _cache_cls()(ttl_seconds=60, clock=clock)
     repo = ProductRepository(cache=cache)
     repo.save(Product("a", "A", 100))
     repo.save(Product("b", "B", 200))
+    repo.save(Product("c", "C", 300))
     assert repo.get("a") is not None
     assert repo.get("b") is not None
 
-    assert repo.delete("a") is True
+    assert repo.get("c") is not None
+    assert repo.delete(deleted_sku) is True
 
-    assert repo.get("a") is None
-    assert repo.get("b") == Product("b", "B", 200)
-    assert repo.storage_reads == 3
+    expected = {"a": Product("a", "A", 100), "b": Product("b", "B", 200), "c": Product("c", "C", 300)}
+    assert repo.get(deleted_sku) is None
+    for sku, product in expected.items():
+        if sku != deleted_sku:
+            assert repo.get(sku) == product
+    assert repo.storage_reads == 4

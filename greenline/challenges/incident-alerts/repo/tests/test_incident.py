@@ -82,26 +82,42 @@ def test_inside_window_max_pages() -> None:
     assert fired[0].value == 0.62
 
 
-def test_zulu_timestamp_is_utc_aware() -> None:
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-08-29T03:14:00Z", INCIDENT_NOW),
+        ("2026-08-29T03:14:00+00:00", INCIDENT_NOW),
+        ("2026-08-28T22:14:00-05:00", INCIDENT_NOW),
+        ("2026-08-29T05:14:00+02:00", INCIDENT_NOW),
+    ],
+)
+def test_offset_timestamp_is_normalized_to_utc(
+    raw: str, expected: datetime
+) -> None:
     """Scrapers stamp Z. The stored datetime must stay UTC-aware."""
-    ts = parse_timestamp("2026-08-29T03:14:00Z")
+    ts = parse_timestamp(raw)
     assert ts.tzinfo is not None, (
         "Zulu timestamps came back naive — window compares will blow up "
         "against an aware `now` (see logs/traceback.txt)"
     )
     assert ts.utcoffset() == timedelta(0)
-    assert ts == INCIDENT_NOW
+    assert ts == expected
 
 
-def test_naive_iso_without_z_is_treated_as_utc() -> None:
-    ts = parse_timestamp("2026-08-29T03:14:00")
+@pytest.mark.parametrize(
+    "raw",
+    ["2026-08-29T03:14:00", "2026-08-29T03:14:00.000", "2026-08-29 03:14:00"],
+)
+def test_naive_iso_without_z_is_treated_as_utc(raw: str) -> None:
+    ts = parse_timestamp(raw)
     assert ts.tzinfo is not None
     assert ts == INCIDENT_NOW
 
 
-def test_window_includes_sample_at_end() -> None:
+@pytest.mark.parametrize("offset_seconds", [0, 1, 299])
+def test_window_includes_sample_at_end(offset_seconds: int) -> None:
     """Evaluation at T must include a sample stamped T. Exclusive end drops it."""
-    end = INCIDENT_NOW
+    end = INCIDENT_NOW + timedelta(seconds=offset_seconds)
     start = end - timedelta(seconds=300)
     on_end = Sample("checkout-api", "error_rate", 0.51, end)
     inside = Sample("checkout-api", "error_rate", 0.44, end - timedelta(seconds=60))
@@ -116,7 +132,8 @@ def test_window_includes_sample_at_end() -> None:
     )
 
 
-def test_evaluator_does_not_fail_closed_on_bad_rule() -> None:
+@pytest.mark.parametrize("aggregator", ["median", "sum", "p99"])
+def test_evaluator_does_not_fail_closed_on_bad_rule(aggregator: str) -> None:
     """A broken rule must surface. Swallowing it is a silent missed page."""
     rule = Rule(
         name="broken",
@@ -124,7 +141,7 @@ def test_evaluator_does_not_fail_closed_on_bad_rule() -> None:
         metric="error_rate",
         threshold=0.50,
         window_seconds=300,
-        aggregator="median",
+        aggregator=aggregator,
     )
     samples = [Sample("checkout-api", "error_rate", 0.51, INCIDENT_NOW - timedelta(seconds=10))]
     with pytest.raises(ValueError, match="unknown aggregator"):

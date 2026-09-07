@@ -43,10 +43,11 @@ def test_rejects_when_sold_out(svc: BookingService) -> None:
     assert len(svc.bookings_for("hamlet")) == 1
 
 
-def test_cancel_restores_seats(svc: BookingService) -> None:
+@pytest.mark.parametrize("seats", [1, 2, 3, 4, 7, 10])
+def test_cancel_restores_seats(svc: BookingService, seats: int) -> None:
     """Cancel must delete the booking AND put the seats back."""
-    booking_id = svc.book("hamlet", "alice", seats=3)
-    assert svc.seats_left("hamlet") == 7
+    booking_id = svc.book("hamlet", "alice", seats=seats)
+    assert svc.seats_left("hamlet") == 10 - seats
 
     svc.cancel(booking_id)
 
@@ -56,12 +57,18 @@ def test_cancel_restores_seats(svc: BookingService) -> None:
         svc.cancel(booking_id)
 
 
-def test_one_booking_per_user_per_show(svc: BookingService) -> None:
+@pytest.mark.parametrize(
+    ("first_seats", "second_seats"),
+    [(1, 1), (1, 2), (2, 1), (2, 3), (4, 1), (5, 5)],
+)
+def test_one_booking_per_user_per_show(
+    svc: BookingService, first_seats: int, second_seats: int
+) -> None:
     """A user may hold at most one booking row for a given show."""
-    svc.book("hamlet", "alice", seats=1)
+    svc.book("hamlet", "alice", seats=first_seats)
     with pytest.raises(AlreadyBooked):
-        svc.book("hamlet", "alice", seats=1)
-    assert svc.seats_left("hamlet") == 9
+        svc.book("hamlet", "alice", seats=second_seats)
+    assert svc.seats_left("hamlet") == 10 - first_seats
     assert len(svc.bookings_for("hamlet")) == 1
 
 

@@ -62,3 +62,30 @@ test("equal urgency remains stable by insertion order", () => {
     ["one", "two", "three"],
   );
 });
+
+for (const scenario of [
+  { now: 10, futureAt: 11, futureUrgency: 2, readyUrgency: 1 },
+  { now: 10, futureAt: 50, futureUrgency: 10, readyUrgency: 2 },
+  { now: 25, futureAt: 26, futureUrgency: 100, readyUrgency: 0 },
+  { now: 0, futureAt: 1, futureUrgency: 1, readyUrgency: 0 },
+  { now: 100, futureAt: 101, futureUrgency: 5, readyUrgency: 4 },
+  { now: 8, futureAt: 80, futureUrgency: 8, readyUrgency: 3 },
+  { now: 12, futureAt: 13, futureUrgency: 7, readyUrgency: 6 },
+  { now: 2, futureAt: 200, futureUrgency: 9, readyUrgency: 1 },
+  { now: 40, futureAt: 41, futureUrgency: 4, readyUrgency: 2 },
+]) {
+  test(`dispatches ready work at time ${scenario.now} before future urgent work`, () => {
+    const queue = new NotificationQueue();
+    queue.enqueue(item("future", {
+      deliverAt: scenario.futureAt,
+      urgency: scenario.futureUrgency,
+    }));
+    queue.enqueue(item("ready", {
+      deliverAt: scenario.now,
+      urgency: scenario.readyUrgency,
+    }));
+
+    assert.equal(queue.take(scenario.now).id, "ready");
+    assert.equal(queue.size(), 1);
+  });
+}

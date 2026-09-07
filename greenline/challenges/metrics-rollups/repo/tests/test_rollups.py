@@ -47,10 +47,16 @@ def test_metrics_are_aggregated_independently() -> None:
     assert snapshot["requests"][0].count == snapshot["latency"][0].count == 1
 
 
-def test_buckets_align_to_utc_minute_not_process_start() -> None:
+@pytest.mark.parametrize(
+    ("first_second", "second_second"),
+    [(1, 59), (5, 40), (20, 58)],
+)
+def test_buckets_align_to_utc_minute_not_process_start(
+    first_second: int, second_second: int
+) -> None:
     store = make_store()
-    store.ingest("latency", 10.0, at(12, 2, 5))
-    store.ingest("latency", 20.0, at(12, 2, 59))
+    store.ingest("latency", 10.0, at(12, 2, first_second))
+    store.ingest("latency", 20.0, at(12, 2, second_second))
 
     [rollup] = store.snapshot(5)["latency"]
     assert rollup.bucket_start == at(12, 2, 0)
@@ -60,14 +66,17 @@ def test_buckets_align_to_utc_minute_not_process_start() -> None:
     assert rollup.count == 2
 
 
-def test_late_arrival_inside_retention_updates_older_bucket() -> None:
+@pytest.mark.parametrize("late_minute", [2, 3, 4])
+def test_late_arrival_inside_retention_updates_older_bucket(
+    late_minute: int,
+) -> None:
     store = make_store()
     assert store.ingest("errors", 5.0, at(12, 5, 10))
-    assert store.ingest("errors", 2.0, at(12, 4, 20))
+    assert store.ingest("errors", 2.0, at(12, late_minute, 20))
 
-    rows = store.snapshot(2)["errors"]
+    rows = store.snapshot(6 - late_minute)["errors"]
     assert [(row.bucket_start, row.average) for row in rows] == [
-        (at(12, 4, 0), 2.0),
+        (at(12, late_minute, 0), 2.0),
         (at(12, 5, 0), 5.0),
     ]
 
@@ -78,14 +87,18 @@ def test_sample_older_than_retention_is_rejected() -> None:
     assert store.snapshot(5) == {}
 
 
-def test_cardinality_limit_rejects_only_new_metric_names() -> None:
-    store = make_store(max_metrics=2)
-    store.ingest("cpu", 1.0, at(12, 5, 1))
-    store.ingest("memory", 2.0, at(12, 5, 2))
-    assert store.ingest("cpu", 3.0, at(12, 5, 3))
+@pytest.mark.parametrize("max_metrics", [1, 2, 3])
+def test_cardinality_limit_rejects_only_new_metric_names(
+    max_metrics: int,
+) -> None:
+    store = make_store(max_metrics=max_metrics)
+    names = [f"metric-{index}" for index in range(max_metrics)]
+    for index, name in enumerate(names):
+        store.ingest(name, float(index), at(12, 5, index + 1))
+    assert store.ingest(names[0], 3.0, at(12, 5, max_metrics + 1))
 
-    with pytest.raises(CardinalityLimitExceeded, match="max_metrics=2"):
-        store.ingest("disk", 4.0, at(12, 5, 4))
+    with pytest.raises(CardinalityLimitExceeded, match=f"max_metrics={max_metrics}"):
+        store.ingest("overflow", 4.0, at(12, 5, max_metrics + 2))
 
 
 def test_expired_metric_releases_its_cardinality_slot() -> None:

@@ -29,14 +29,29 @@ def test_project_member_can_list_and_read(client: TestClient) -> None:
     assert response.json()["title"] == "Launch checklist"
 
 
-def test_document_must_belong_to_project_in_url(client: TestClient) -> None:
+@pytest.mark.parametrize(
+    ("project_id", "document_id", "user", "workspace"),
+    [
+        ("project-a", "doc-secret", "alice", "workspace-a"),
+        ("project-a", "doc-b", "alice", "workspace-a"),
+        ("project-secret", "doc-a", "admin-a", "workspace-a"),
+        ("project-secret", "doc-b", "admin-a", "workspace-a"),
+        ("project-b", "doc-a", "bob", "workspace-b"),
+    ],
+)
+def test_document_must_belong_to_project_in_url(
+    client: TestClient,
+    project_id: str,
+    document_id: str,
+    user: str,
+    workspace: str,
+) -> None:
     response = client.get(
-        "/projects/project-a/documents/doc-secret",
-        headers=auth("alice", "workspace-a"),
+        f"/projects/{project_id}/documents/{document_id}",
+        headers=auth(user, workspace),
     )
     assert response.status_code == 404
-    assert "Acquisition notes" not in response.text
-    assert "project-secret" not in response.text
+    assert document_id not in response.text
 
 
 def test_cross_workspace_request_is_forbidden_without_data_leak(client: TestClient) -> None:
@@ -56,11 +71,15 @@ def test_non_member_cannot_read_project(client: TestClient) -> None:
     assert response.status_code == 403
 
 
-def test_viewer_cannot_rename(client: TestClient) -> None:
+@pytest.mark.parametrize(
+    "new_title",
+    ["Viewer changed this", "Leaked edit", "Unauthorized", "Draft", "Replacement"],
+)
+def test_viewer_cannot_rename(client: TestClient, new_title: str) -> None:
     response = client.patch(
         "/projects/project-a/documents/doc-a",
         headers=auth("vera", "workspace-a"),
-        json={"title": "Viewer changed this"},
+        json={"title": new_title},
     )
     assert response.status_code == 403
 
@@ -70,7 +89,10 @@ def test_viewer_cannot_rename(client: TestClient) -> None:
     assert unchanged.json()["title"] == "Launch checklist"
 
 
-def test_editor_can_rename_but_cannot_delete(client: TestClient) -> None:
+@pytest.mark.parametrize("document_id", ["doc-a", "doc-secret", "doc-b"])
+def test_editor_can_rename_but_cannot_delete(
+    client: TestClient, document_id: str
+) -> None:
     renamed = client.patch(
         "/projects/project-a/documents/doc-a",
         headers=auth("alice", "workspace-a"),
@@ -80,7 +102,8 @@ def test_editor_can_rename_but_cannot_delete(client: TestClient) -> None:
     assert renamed.json()["title"] == "Launch runbook"
 
     denied = client.delete(
-        "/projects/project-a/documents/doc-a", headers=auth("alice", "workspace-a")
+        f"/projects/project-a/documents/{document_id}",
+        headers=auth("alice", "workspace-a"),
     )
     assert denied.status_code == 403
     assert client.get(

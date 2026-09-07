@@ -35,7 +35,9 @@ def test_retry_after_overrides_client_backoff() -> None:
     assert sleeps == [7.0]
 
 
-@pytest.mark.parametrize("status", [400, 401, 404, 500])
+@pytest.mark.parametrize(
+    "status", [400, 401, 402, 403, 404, 405, 409, 422, 500, 501]
+)
 def test_permanent_response_is_not_retried(status: int) -> None:
     sender = Sender([Response(status, {}), Response(200, {})])
     with pytest.raises(DeliveryRejected, match=str(status)):

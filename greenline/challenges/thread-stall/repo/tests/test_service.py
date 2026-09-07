@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from threading import Barrier, Lock, current_thread
 
+import pytest
+
 from reporting.service import ReportService
 
 
@@ -28,16 +30,32 @@ def test_single_request_builds_report() -> None:
         assert service.reports_for(["acct-101"]) == ["report:acct-101:Ada"]
 
 
-def test_saturated_pool_completes_without_starvation() -> None:
+@pytest.mark.parametrize("max_workers", [2, 3, 4, 5, 6, 7])
+def test_saturated_pool_completes_without_starvation(max_workers: int) -> None:
+    user_ids = [f"acct-{index}" for index in range(max_workers)]
     started = time.monotonic()
-    with ReportService(load_profile, max_workers=2, wait_seconds=0.15) as service:
-        reports = service.reports_for(["acct-101", "acct-202"])
+    with ReportService(lambda user_id: user_id, max_workers=max_workers, wait_seconds=0.05) as service:
+        reports = service.reports_for(user_ids)
 
-    assert reports == ["report:acct-101:Ada", "report:acct-202:Lin"]
+    assert reports == [f"report:{user_id}:{user_id}" for user_id in user_ids]
     assert time.monotonic() - started < 1.0
 
 
-def test_report_work_overlaps_on_the_bounded_worker_pool() -> None:
+@pytest.mark.parametrize(
+    "user_ids",
+    [
+        ["acct-101", "acct-202"],
+        ["acct-a", "acct-b"],
+        ["acct-1", "acct-2"],
+        ["north", "south"],
+        ["red", "blue"],
+        ["primary", "secondary"],
+        ["sender", "receiver"],
+    ],
+)
+def test_report_work_overlaps_on_the_bounded_worker_pool(
+    user_ids: list[str],
+) -> None:
     loader_gate = Barrier(2)
     names: set[str] = set()
     names_lock = Lock()
@@ -50,10 +68,9 @@ def test_report_work_overlaps_on_the_bounded_worker_pool() -> None:
         loader_gate.wait(timeout=0.3)
         return user_id
 
-    with ReportService(overlapping_loader, max_workers=2, wait_seconds=0.35) as service:
-        assert service.reports_for(["acct-101", "acct-202"]) == [
-            "report:acct-101:acct-101",
-            "report:acct-202:acct-202",
+    with ReportService(overlapping_loader, max_workers=2, wait_seconds=0.1) as service:
+        assert service.reports_for(user_ids) == [
+            f"report:{user_id}:{user_id}" for user_id in user_ids
         ]
 
     assert len(names) == 2

@@ -86,3 +86,57 @@ test("manual flush sends at most one configured batch", () => {
   assert.equal(batcher.flush("acme"), 2);
   assert.equal(batcher.flush("acme"), 0);
 });
+
+for (const batchSize of [1, 2, 4, 5]) {
+  test(`automatically flushes exactly at boundary ${batchSize}`, () => {
+    const sender = new Sender();
+    const batcher = new TenantBatcher(sender, batchSize);
+
+    let flushed = 0;
+    for (let number = 1; number <= batchSize; number += 1) {
+      flushed = batcher.enqueue(event("acme", String(number)));
+    }
+
+    assert.equal(flushed, batchSize);
+    assert.equal(batcher.pending("acme"), 0);
+    assert.deepEqual(sender.calls[0].ids, Array.from(
+      { length: batchSize },
+      (_, index) => String(index + 1),
+    ));
+  });
+}
+
+for (const [firstTenant, secondTenant, suffix] of [
+  ["acme", "globex", "alpha"],
+  ["north", "south", "beta"],
+  ["red", "blue", "gamma"],
+]) {
+  test(`keeps ${suffix} tenant interleaving isolated`, () => {
+    const sender = new Sender();
+    const batcher = new TenantBatcher(sender, 2);
+
+    batcher.enqueue(event(firstTenant, `${suffix}-1`));
+    batcher.enqueue(event(secondTenant, `${suffix}-2`));
+    batcher.enqueue(event(firstTenant, `${suffix}-3`));
+
+    assert.deepEqual(sender.calls, [{
+      tenantId: firstTenant,
+      ids: [`${suffix}-1`, `${suffix}-3`],
+    }]);
+    assert.equal(batcher.pending(secondTenant), 1);
+  });
+}
+
+for (const queuedCount of [1, 3]) {
+  test(`retains ${queuedCount} queued event(s) after a manual delivery failure`, () => {
+    const sender = new Sender();
+    const batcher = new TenantBatcher(sender, queuedCount + 1);
+    for (let number = 1; number <= queuedCount; number += 1) {
+      batcher.enqueue(event("acme", String(number)));
+    }
+    sender.failTenant = "acme";
+
+    assert.throws(() => batcher.flush("acme"), /unavailable/);
+    assert.equal(batcher.pending("acme"), queuedCount);
+  });
+}

@@ -55,7 +55,11 @@ def test_concurrent_disjoint_transfers() -> None:
     assert store.balance("carol") == 5_300
 
 
-def test_concurrent_opposite_transfers() -> None:
+@pytest.mark.parametrize(
+    "amount",
+    [1, 10, 50, 100, 250, 500, 750, 1_000, 2_000, 3_000, 4_000, 5_000],
+)
+def test_concurrent_opposite_transfers(amount: int) -> None:
     """Opposite-direction transfers must not deadlock; net balances unchanged."""
     svc, store = make_service()
     barrier = threading.Barrier(2)
@@ -68,12 +72,12 @@ def test_concurrent_opposite_transfers() -> None:
         except BaseException as exc:
             errors.append(exc)
 
-    t1 = threading.Thread(target=move, args=("alice", "bob", 750), daemon=True)
-    t2 = threading.Thread(target=move, args=("bob", "alice", 750), daemon=True)
+    t1 = threading.Thread(target=move, args=("alice", "bob", amount), daemon=True)
+    t2 = threading.Thread(target=move, args=("bob", "alice", amount), daemon=True)
     t1.start()
     t2.start()
-    t1.join(timeout=5)
-    t2.join(timeout=5)
+    t1.join(timeout=0.5)
+    t2.join(timeout=0.5)
 
     assert not t1.is_alive(), "alice→bob transfer hung (deadlock?)"
     assert not t2.is_alive(), "bob→alice transfer hung (deadlock?)"

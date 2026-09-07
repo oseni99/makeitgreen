@@ -39,26 +39,37 @@ def test_incident_fixture_is_drained_and_healthy_events_keep_order() -> None:
     ]
 
 
-def test_consecutive_invalid_events_are_classified_independently() -> None:
+@pytest.mark.parametrize(
+    ("bad_payload", "reason"),
+    [
+        ("{", "invalid_json"),
+        ("null", "invalid_json"),
+        ("[]", "invalid_json"),
+        ({"metric": "temperature", "value": 4}, "missing_device"),
+        ({"device": "", "metric": "temperature", "value": 4}, "missing_device"),
+        ({"device": "   ", "metric": "pressure", "value": 4}, "missing_device"),
+        ({"device": "d-1", "metric": "voltage", "value": 4}, "unknown_metric"),
+        ({"device": "d-1", "value": 4}, "unknown_metric"),
+        ({"device": "d-1", "metric": "pressure", "value": "high"}, "invalid_measurement"),
+        ({"device": "d-1", "metric": "temperature", "value": True}, "invalid_measurement"),
+        ({"device": "d-1", "metric": "temperature", "value": None}, "invalid_measurement"),
+    ],
+)
+def test_invalid_event_does_not_block_the_healthy_event_behind_it(
+    bad_payload: dict | str,
+    reason: str,
+) -> None:
     store = StateStore()
     quarantine = QuarantineSink()
     queue = [
-        envelope("bad-json", "{"),
-        envelope("no-device", {"metric": "temperature", "value": 4}),
-        envelope("bad-metric", {"device": "d-1", "metric": "voltage", "value": 4}),
-        envelope("bad-value", {"device": "d-1", "metric": "pressure", "value": "high"}),
+        envelope("bad", bad_payload),
         envelope("good", {"device": "d-1", "metric": "pressure", "value": 5}),
     ]
 
     Worker(store, quarantine).run(queue)
 
     assert queue == []
-    assert [record["reason"] for record in quarantine.records] == [
-        "invalid_json",
-        "missing_device",
-        "unknown_metric",
-        "invalid_measurement",
-    ]
+    assert [record["reason"] for record in quarantine.records] == [reason]
     assert store.applied_event_ids == ["good"]
 
 

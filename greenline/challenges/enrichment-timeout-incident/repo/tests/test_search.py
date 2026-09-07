@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from search import EnrichmentClient, FakeClock, SearchService
 
 
@@ -30,14 +32,31 @@ def test_exact_budget_is_still_accepted_live() -> None:
     assert clock.elapsed_ms == 750
 
 
-def test_stalled_enrichment_is_bounded_and_falls_back() -> None:
-    clock, client, service = setup(latency_ms=300_000)
+@pytest.mark.parametrize(
+    ("query", "latency_ms"),
+    [
+        ("invoice", 751),
+        ("customer", 1_000),
+        ("payment", 2_500),
+        ("refund", 10_000),
+        ("shipment", 30_000),
+        ("catalog", 60_000),
+        ("checkout", 120_000),
+        ("ledger", 180_000),
+        ("profile", 240_000),
+        ("search", 300_000),
+    ],
+)
+def test_stalled_enrichment_is_bounded_and_falls_back(
+    query: str, latency_ms: int
+) -> None:
+    clock, client, service = setup(latency_ms=latency_ms)
 
-    result = service.handle("invoice")
+    result = service.handle(query)
 
     assert result == {
         "status": 200,
-        "results": ["invoice"],
+        "results": [query],
         "labels": [],
         "enrichment": "unavailable",
     }
@@ -47,9 +66,11 @@ def test_stalled_enrichment_is_bounded_and_falls_back() -> None:
 
 
 def test_repeated_stalls_do_not_accumulate_capacity() -> None:
-    _, _, service = setup(latency_ms=300_000, capacity=2)
+    clock, client, service = setup(latency_ms=300_000, capacity=2)
 
     assert [service.handle("invoice")["status"] for _ in range(5)] == [200] * 5
+    assert client.calls == [750] * 5
+    assert clock.elapsed_ms == 750 * 5
     assert service.health() == "ok"
 
 

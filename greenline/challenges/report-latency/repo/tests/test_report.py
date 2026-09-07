@@ -5,6 +5,8 @@ names the hot frame (and the red herring).
 """
 from __future__ import annotations
 
+import pytest
+
 from report.models import Order
 from report.service import build_customer_report
 
@@ -62,15 +64,33 @@ def test_empty_input() -> None:
     assert build_customer_report([]) == {}
 
 
-def test_large_report_does_not_rescan_per_customer() -> None:
+@pytest.mark.parametrize(
+    ("n_customers", "orders_per"),
+    [
+        (4, 1),
+        (5, 2),
+        (8, 3),
+        (10, 5),
+        (12, 4),
+        (15, 6),
+        (20, 5),
+        (25, 8),
+        (30, 10),
+        (40, 5),
+        (50, 10),
+        (100, 10),
+        (200, 25),
+    ],
+)
+def test_large_report_does_not_rescan_per_customer(
+    n_customers: int, orders_per: int
+) -> None:
     """Production-sized input: one pass per customer is what burned the SLO.
 
     The profiler showed ~6k calls into _orders_for_customer, each walking the
     full list. A fixed implementation groups in a constant number of passes.
     """
     items: list[Order] = []
-    n_customers = 200
-    orders_per = 25  # 5000 orders
     oid = 1
     for c in range(n_customers):
         cid = f"c-{c}"

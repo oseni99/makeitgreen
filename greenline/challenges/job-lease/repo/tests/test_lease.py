@@ -1,5 +1,7 @@
 from threading import Barrier, Event, Lock, Thread
 
+import pytest
+
 from lease_service.store import LeaseStore
 
 
@@ -33,21 +35,28 @@ def test_expired_lease_can_be_taken_by_new_owner() -> None:
     assert current.generation > old.generation
 
 
-def test_expired_owner_cannot_renew_before_takeover() -> None:
+@pytest.mark.parametrize("elapsed", [10, 11, 100])
+def test_expired_owner_cannot_renew_before_takeover(elapsed: float) -> None:
     clock = Clock()
     store = LeaseStore(clock, ttl=10)
     lease = store.acquire("worker-a")
     assert lease is not None
-    clock.value = 111
+    clock.value += elapsed
     assert store.renew(lease) is None
 
 
-def test_stale_owner_cannot_renew_or_release_new_generation() -> None:
+@pytest.mark.parametrize(
+    ("ttl", "elapsed"),
+    [(1, 2), (5, 6), (10, 11), (30, 31)],
+)
+def test_stale_owner_cannot_renew_or_release_new_generation(
+    ttl: float, elapsed: float
+) -> None:
     clock = Clock()
-    store = LeaseStore(clock, ttl=10)
+    store = LeaseStore(clock, ttl=ttl)
     old = store.acquire("worker-a")
     assert old is not None
-    clock.value = 111
+    clock.value += elapsed
     current = store.acquire("worker-a")
     assert current is not None
     assert store.renew(old) is None
@@ -55,7 +64,8 @@ def test_stale_owner_cannot_renew_or_release_new_generation() -> None:
     assert store.renew(current) is not None
 
 
-def test_only_one_worker_acquires_an_available_lease() -> None:
+@pytest.mark.parametrize("ttl", [1, 2, 5, 10, 30, 60])
+def test_only_one_worker_acquires_an_available_lease(ttl: float) -> None:
     ready = Barrier(2)
     both_started = Event()
     started_lock = Lock()
@@ -65,7 +75,7 @@ def test_only_one_worker_acquires_an_available_lease() -> None:
         both_started.wait()
         return 100.0
 
-    store = LeaseStore(coordinated_now, ttl=10)
+    store = LeaseStore(coordinated_now, ttl=ttl)
     acquired = []
 
     def acquire(owner: str) -> None:

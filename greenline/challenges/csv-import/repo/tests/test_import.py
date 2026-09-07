@@ -9,20 +9,26 @@ def test_valid_file_is_normalized() -> None:
     assert result.rejected == ()
 
 
-def test_bad_rows_are_quarantined_without_losing_good_rows() -> None:
-    payload = (
-        b"external_id,email,age\n"
-        b"c-1,ada@example.com,36\n"
-        b"c-2,not-an-email,unknown\n"
-        b",nobody@example.com,20\n"
-        b"c-3,grace@example.com,42\n"
-    )
+@pytest.mark.parametrize(
+    ("row", "reason"),
+    [
+        (",nobody@example.com,20", "missing_external_id"),
+        ("   ,nobody@example.com,20", "missing_external_id"),
+        ("c-1,not-an-email,20", "invalid_email"),
+        ("c-1,@example.com,20", "invalid_email"),
+        ("c-1,nobody@,20", "invalid_email"),
+        ("c-1,nobody@example.com,unknown", "invalid_age"),
+        ("c-1,nobody@example.com,-1", "invalid_age"),
+        ("c-1,nobody@example.com,", "invalid_age"),
+    ],
+)
+def test_invalid_row_is_quarantined(row: str, reason: str) -> None:
+    payload = f"external_id,email,age\n{row}\n".encode()
+
     result = import_customers(payload)
-    assert [row["external_id"] for row in result.accepted] == ["c-1", "c-3"]
-    assert result.rejected == (
-        {"row": 3, "reason": "invalid_email"},
-        {"row": 4, "reason": "missing_external_id"},
-    )
+
+    assert result.accepted == ()
+    assert result.rejected == ({"row": 2, "reason": reason},)
 
 
 def test_utf8_bom_is_not_part_of_first_header() -> None:
@@ -30,11 +36,20 @@ def test_utf8_bom_is_not_part_of_first_header() -> None:
     assert result.accepted[0]["external_id"] == "c-1"
 
 
-def test_missing_schema_is_a_file_error() -> None:
-    with pytest.raises(ImportFormatError, match="missing columns: age"):
-        import_customers(b"external_id,email\nc-1,a@example.com\n")
+@pytest.mark.parametrize(
+    ("header", "missing"),
+    [
+        ("external_id,email", "age"),
+        ("external_id,age", "email"),
+        ("email,age", "external_id"),
+    ],
+)
+def test_missing_schema_is_a_file_error(header: str, missing: str) -> None:
+    with pytest.raises(ImportFormatError, match=f"missing columns: {missing}"):
+        import_customers(f"{header}\nvalue,value\n".encode())
 
 
-def test_invalid_utf8_is_a_file_error() -> None:
+@pytest.mark.parametrize("invalid_byte", [b"\xff", b"\xfe"])
+def test_invalid_utf8_is_a_file_error(invalid_byte: bytes) -> None:
     with pytest.raises(ImportFormatError, match="UTF-8"):
-        import_customers(b"external_id,email,age\nc-1,\xff,9\n")
+        import_customers(b"external_id,email,age\nc-1," + invalid_byte + b",9\n")

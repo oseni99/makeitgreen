@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 
+import pytest
+
 from events.bus import EventBus
 from events.models import Event
 
@@ -38,24 +40,34 @@ def _dispatcher_cls():
     return WebhookDispatcher
 
 
-def test_dispatcher_posts_signed_json_body() -> None:
+@pytest.mark.parametrize(
+    ("event", "endpoint", "secret"),
+    [
+        (_event(), "https://hooks.example.test/a", "topsecret"),
+        (Event("evt-10", "order.paid", {"order_id": 43}), "https://hooks.example.test/b", "beta"),
+        (Event("evt-11", "order.cancelled", {"reason": "fraud"}), "https://hooks.example.test/c", "gamma"),
+    ],
+)
+def test_dispatcher_posts_signed_json_body(
+    event: Event, endpoint: str, secret: str
+) -> None:
     WebhookDispatcher = _dispatcher_cls()
     transport = FakeTransport()
     hooks = WebhookDispatcher(transport=transport)
-    hooks.register("https://hooks.example.test/a", secret="topsecret")
+    hooks.register(endpoint, secret=secret)
 
-    hooks.deliver(_event())
+    hooks.deliver(event)
 
     assert len(transport.calls) == 1
     url, body, headers = transport.calls[0]
-    assert url == "https://hooks.example.test/a"
+    assert url == endpoint
     payload = json.loads(body.decode())
     assert payload == {
-        "id": "evt-9",
-        "type": "order.created",
-        "payload": {"order_id": 42},
+        "id": event.id,
+        "type": event.type,
+        "payload": event.payload,
     }
-    expected = hmac.new(b"topsecret", body, hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     assert headers.get("X-Signature") == f"sha256={expected}"
     assert headers.get("Content-Type") == "application/json"
 
@@ -75,10 +87,11 @@ def test_bus_publish_fans_out_to_webhooks() -> None:
     assert len(transport.calls) == 1
 
 
-def test_retries_once_on_5xx() -> None:
+@pytest.mark.parametrize("status", [500, 502, 503, 599])
+def test_retries_once_on_5xx(status: int) -> None:
     WebhookDispatcher = _dispatcher_cls()
     transport = FakeTransport()
-    transport.queue_status(503, 200)
+    transport.queue_status(status, 200)
     hooks = WebhookDispatcher(transport=transport)
     hooks.register("https://hooks.example.test/a", secret="k")
 
@@ -87,10 +100,11 @@ def test_retries_once_on_5xx() -> None:
     assert len(transport.calls) == 2
 
 
-def test_does_not_retry_on_4xx() -> None:
+@pytest.mark.parametrize("status", [400, 401, 404, 422])
+def test_does_not_retry_on_4xx(status: int) -> None:
     WebhookDispatcher = _dispatcher_cls()
     transport = FakeTransport()
-    transport.queue_status(400)
+    transport.queue_status(status)
     hooks = WebhookDispatcher(transport=transport)
     hooks.register("https://hooks.example.test/a", secret="k")
 

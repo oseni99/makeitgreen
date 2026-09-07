@@ -45,7 +45,7 @@ test('Retry-After overrides client backoff', () => {
   assert.deepEqual(sleeps, [7])
 })
 
-for (const status of [400, 401, 404, 500]) {
+for (const status of [400, 401, 402, 403, 404, 405, 409, 422, 500, 501]) {
   test(`status ${status} is a permanent rejection`, () => {
     const transport = sender([{ status, headers: {} }, { status: 200, headers: {} }])
     assert.throws(() => deliver(transport.send, () => {}), DeliveryRejected)
