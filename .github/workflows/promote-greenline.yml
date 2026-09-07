@@ -42,7 +42,7 @@ jobs:
       attestations: write
       artifact-metadata: write
     env:
-      SKOPEO_IMAGE: quay.io/skopeo/stable:latest@sha256:2a0046b50fd80ef7a9e2e79587d800292ea7437c81d9cdc058b05448f8b1a999
+      SKOPEO_IMAGE: quay.io/skopeo/stable:v1.22.2-immutable@sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
