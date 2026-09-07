@@ -3,7 +3,6 @@ from collections.abc import Callable
 
 import pytest
 
-import orders.inventory as inventory_module
 from orders.inventory import InsufficientStock, Inventory
 from orders.service import OrderService
 
@@ -73,14 +72,23 @@ def test_applies_discount_boundaries() -> None:
     assert (ten_percent.discount_cents, ten_percent.total_cents) == (1_000, 9_000)
 
 
-def test_different_skus_do_not_share_one_reservation_lock(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    inventory = Inventory()
+def test_different_skus_reach_authorization_concurrently() -> None:
+    authorizing = set()
+    authorizing_lock = threading.Lock()
+    both_authorizing = threading.Event()
+    release_authorization = threading.Event()
+
+    def authorize(sku: str) -> None:
+        with authorizing_lock:
+            authorizing.add(sku)
+            if authorizing == {"GPU", "CPU"}:
+                both_authorizing.set()
+        if not release_authorization.wait(timeout=2):
+            raise TimeoutError(f"authorization for {sku} was not released")
+
+    inventory = Inventory(authorize=authorize)
     inventory.add_stock("GPU", 1)
     inventory.add_stock("CPU", 1)
-    authorization = threading.Barrier(2, timeout=1)
-    monkeypatch.setattr(inventory_module.time, "sleep", lambda _seconds: authorization.wait())
     errors: list[BaseException] = []
 
     def reserve(sku: str) -> None:
@@ -95,8 +103,12 @@ def test_different_skus_do_not_share_one_reservation_lock(
     ]
     for thread in threads:
         thread.start()
-    for thread in threads:
-        thread.join(timeout=2)
+    try:
+        assert both_authorizing.wait(timeout=1), authorizing
+    finally:
+        release_authorization.set()
+        for thread in threads:
+            thread.join(timeout=2)
 
     assert all(not thread.is_alive() for thread in threads)
     assert errors == []

@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, BrokenBarrierError
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,6 +25,26 @@ def listed_entries() -> list[dict]:
     response = client.get("/entries")
     assert response.status_code == 200
     return response.json()["entries"]
+
+
+def synchronize_legacy_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make a split idempotency check/write race deterministic.
+
+    Broken check-then-add handlers let both requests reach this barrier before
+    either write becomes visible. The timeout fallback allows implementations
+    that correctly serialize callers before reaching the write seam.
+    """
+    callers = Barrier(2)
+    original_add = STORE.add
+
+    def synchronized_add(account: str, amount_cents: int, memo: str) -> dict:
+        try:
+            callers.wait(timeout=2)
+        except BrokenBarrierError:
+            pass
+        return original_add(account, amount_cents, memo)
+
+    monkeypatch.setattr(STORE, "add", synchronized_add)
 
 
 def test_empty_ledger_returns_an_empty_collection() -> None:
@@ -172,3 +195,47 @@ def test_reusing_key_for_different_payload_is_rejected_without_a_write() -> None
     assert conflict.status_code == 409
     assert conflict.json() == {"detail": "idempotency key already used for another request"}
     assert listed_entries() == [original]
+
+
+def test_concurrent_retries_are_one_atomic_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    synchronize_legacy_writes(monkeypatch)
+    headers = {"Idempotency-Key": "concurrent-retry"}
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(
+            pool.map(
+                lambda _attempt: client.post(
+                    "/entries", json=make_entry(), headers=headers
+                ),
+                range(2),
+            )
+        )
+
+    assert [response.status_code for response in responses] == [201, 201]
+    assert responses[0].json() == responses[1].json()
+    assert listed_entries() == [responses[0].json()]
+
+
+def test_concurrent_key_conflict_rejects_one_request_without_duplicate_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synchronize_legacy_writes(monkeypatch)
+    headers = {"Idempotency-Key": "concurrent-conflict"}
+    payloads = [make_entry(memo="first request"), make_entry(memo="other request")]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(
+            pool.map(
+                lambda payload: client.post("/entries", json=payload, headers=headers),
+                payloads,
+            )
+        )
+
+    successes = [response for response in responses if response.status_code == 201]
+    conflicts = [response for response in responses if response.status_code == 409]
+    assert len(successes) == 1
+    assert len(conflicts) == 1
+    assert conflicts[0].json() == {
+        "detail": "idempotency key already used for another request"
+    }
+    assert listed_entries() == [successes[0].json()]

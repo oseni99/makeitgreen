@@ -6,6 +6,34 @@ from fastapi.testclient import TestClient
 from vault_api.app import create_app
 
 
+PROTECTED_DOCUMENT_DATA = {
+    "doc-a": (
+        "doc-a",
+        "project-a",
+        "workspace-a",
+        "Launch checklist",
+        "alice",
+        "workspace-a/project-a/doc-a.md",
+    ),
+    "doc-secret": (
+        "doc-secret",
+        "project-secret",
+        "workspace-a",
+        "Acquisition notes",
+        "admin-a",
+        "workspace-a/project-secret/doc-secret.md",
+    ),
+    "doc-b": (
+        "doc-b",
+        "project-b",
+        "workspace-b",
+        "Customer export",
+        "bob",
+        "workspace-b/project-b/doc-b.csv",
+    ),
+}
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app())
@@ -13,6 +41,16 @@ def client() -> TestClient:
 
 def auth(user: str, workspace: str) -> dict[str, str]:
     return {"X-User-Id": user, "X-Workspace-Id": workspace}
+
+
+def assert_no_protected_document_data(
+    response, document_id: str, current_document: dict | None = None
+) -> None:
+    protected_values = set(PROTECTED_DOCUMENT_DATA[document_id])
+    if current_document is not None:
+        protected_values.update(str(value) for value in current_document.values())
+    for protected_value in protected_values:
+        assert protected_value not in response.text
 
 
 def test_project_member_can_list_and_read(client: TestClient) -> None:
@@ -51,7 +89,7 @@ def test_document_must_belong_to_project_in_url(
         headers=auth(user, workspace),
     )
     assert response.status_code == 404
-    assert document_id not in response.text
+    assert_no_protected_document_data(response, document_id)
 
 
 def test_cross_workspace_request_is_forbidden_without_data_leak(client: TestClient) -> None:
@@ -59,8 +97,7 @@ def test_cross_workspace_request_is_forbidden_without_data_leak(client: TestClie
         "/projects/project-b/documents/doc-b", headers=auth("alice", "workspace-a")
     )
     assert response.status_code == 403
-    assert "Customer export" not in response.text
-    assert "workspace-b/project-b" not in response.text
+    assert_no_protected_document_data(response, "doc-b")
 
 
 def test_non_member_cannot_read_project(client: TestClient) -> None:
@@ -69,6 +106,7 @@ def test_non_member_cannot_read_project(client: TestClient) -> None:
         headers=auth("charlie", "workspace-a"),
     )
     assert response.status_code == 403
+    assert_no_protected_document_data(response, "doc-a")
 
 
 @pytest.mark.parametrize(
@@ -82,6 +120,7 @@ def test_viewer_cannot_rename(client: TestClient, new_title: str) -> None:
         json={"title": new_title},
     )
     assert response.status_code == 403
+    assert_no_protected_document_data(response, "doc-a")
 
     unchanged = client.get(
         "/projects/project-a/documents/doc-a", headers=auth("alice", "workspace-a")
@@ -89,9 +128,20 @@ def test_viewer_cannot_rename(client: TestClient, new_title: str) -> None:
     assert unchanged.json()["title"] == "Launch checklist"
 
 
-@pytest.mark.parametrize("document_id", ["doc-a", "doc-secret", "doc-b"])
+@pytest.mark.parametrize(
+    ("document_id", "actual_project_id", "reader", "workspace"),
+    [
+        ("doc-a", "project-a", "alice", "workspace-a"),
+        ("doc-secret", "project-secret", "admin-a", "workspace-a"),
+        ("doc-b", "project-b", "bob", "workspace-b"),
+    ],
+)
 def test_editor_can_rename_but_cannot_delete(
-    client: TestClient, document_id: str
+    client: TestClient,
+    document_id: str,
+    actual_project_id: str,
+    reader: str,
+    workspace: str,
 ) -> None:
     renamed = client.patch(
         "/projects/project-a/documents/doc-a",
@@ -101,14 +151,20 @@ def test_editor_can_rename_but_cannot_delete(
     assert renamed.status_code == 200
     assert renamed.json()["title"] == "Launch runbook"
 
+    target_url = f"/projects/{actual_project_id}/documents/{document_id}"
+    before = client.get(target_url, headers=auth(reader, workspace))
+    assert before.status_code == 200
+
     denied = client.delete(
         f"/projects/project-a/documents/{document_id}",
         headers=auth("alice", "workspace-a"),
     )
     assert denied.status_code == 403
-    assert client.get(
-        "/projects/project-a/documents/doc-a", headers=auth("alice", "workspace-a")
-    ).status_code == 200
+    assert_no_protected_document_data(denied, document_id, before.json())
+
+    unchanged = client.get(target_url, headers=auth(reader, workspace))
+    assert unchanged.status_code == 200
+    assert unchanged.json() == before.json()
 
 
 def test_workspace_administrator_can_delete(client: TestClient) -> None:

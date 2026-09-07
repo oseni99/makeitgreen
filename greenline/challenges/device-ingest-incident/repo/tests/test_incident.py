@@ -73,6 +73,35 @@ def test_invalid_event_does_not_block_the_healthy_event_behind_it(
     assert store.applied_event_ids == ["good"]
 
 
+def test_consecutive_invalid_events_are_quarantined_before_processing_continues() -> None:
+    store = StateStore()
+    quarantine = QuarantineSink()
+    queue = [
+        envelope("bad-json", "{"),
+        envelope("no-device", {"metric": "temperature", "value": 4}),
+        envelope("bad-metric", {"device": "d-1", "metric": "voltage", "value": 4}),
+        envelope("bad-value", {"device": "d-1", "metric": "pressure", "value": "high"}),
+        envelope("good", {"device": "d-1", "metric": "pressure", "value": 5}),
+    ]
+
+    Worker(store, quarantine).run(queue)
+
+    assert queue == []
+    assert [
+        (record["event_id"], record["reason"])
+        for record in quarantine.records
+    ] == [
+        ("bad-json", "invalid_json"),
+        ("no-device", "missing_device"),
+        ("bad-metric", "unknown_metric"),
+        ("bad-value", "invalid_measurement"),
+    ]
+    assert store.applied_event_ids == ["good"]
+    assert store.devices == {
+        "d-1": {"pressure": {"count": 1, "total": 5.0}},
+    }
+
+
 def test_redelivered_valid_event_is_applied_once() -> None:
     store = StateStore()
     quarantine = QuarantineSink()

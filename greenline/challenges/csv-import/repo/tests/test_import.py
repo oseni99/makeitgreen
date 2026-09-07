@@ -31,6 +31,29 @@ def test_invalid_row_is_quarantined(row: str, reason: str) -> None:
     assert result.rejected == ({"row": 2, "reason": reason},)
 
 
+def test_bad_rows_are_quarantined_while_later_good_rows_keep_source_order() -> None:
+    payload = (
+        b"external_id,email,age\n"
+        b" c-1 ,ADA@EXAMPLE.COM,36\n"
+        b"c-2,not-an-email,20\n"
+        b"c-3,grace@example.com,42\n"
+        b",nobody@example.com,20\n"
+        b"c-4,LINUS@EXAMPLE.COM,55\n"
+    )
+
+    result = import_customers(payload)
+
+    assert result.accepted == (
+        {"external_id": "c-1", "email": "ada@example.com", "age": 36},
+        {"external_id": "c-3", "email": "grace@example.com", "age": 42},
+        {"external_id": "c-4", "email": "linus@example.com", "age": 55},
+    )
+    assert result.rejected == (
+        {"row": 3, "reason": "invalid_email"},
+        {"row": 5, "reason": "missing_external_id"},
+    )
+
+
 def test_utf8_bom_is_not_part_of_first_header() -> None:
     result = import_customers("\ufeffexternal_id,email,age\nc-1,a@example.com,9\n".encode())
     assert result.accepted[0]["external_id"] == "c-1"

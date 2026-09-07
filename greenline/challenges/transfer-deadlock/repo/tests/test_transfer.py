@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 
@@ -76,8 +77,9 @@ def test_concurrent_opposite_transfers(amount: int) -> None:
     t2 = threading.Thread(target=move, args=("bob", "alice", amount), daemon=True)
     t1.start()
     t2.start()
-    t1.join(timeout=0.5)
-    t2.join(timeout=0.5)
+    deadline = time.monotonic() + 1.0
+    for thread in (t1, t2):
+        thread.join(timeout=max(0, deadline - time.monotonic()))
 
     assert not t1.is_alive(), "alice→bob transfer hung (deadlock?)"
     assert not t2.is_alive(), "bob→alice transfer hung (deadlock?)"

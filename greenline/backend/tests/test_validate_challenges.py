@@ -187,6 +187,32 @@ def test_validator_accepts_pristine_suite_below_declared_pass_limit(
     assert validate_challenges.validate_challenge("demo") is True
 
 
+def test_validator_rejects_entirely_red_pristine_suite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps({"difficulty": "Medium"})
+    )
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "15 failed in 0.01s"), (0, "15 passed in 0.01s")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
 def test_medium_challenges_inherit_catalog_quality_thresholds(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

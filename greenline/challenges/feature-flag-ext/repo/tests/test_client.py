@@ -11,6 +11,16 @@ def client(source, clock, ttl=30):
     return FlagClient(source, clock=clock, ttl_seconds=ttl)
 
 
+def test_working_source_returns_an_isolated_snapshot() -> None:
+    source = MemoryFlagSource({"prod": Snapshot(1, {"search": True})})
+
+    fetched = source.fetch("prod")
+    fetched.values["search"] = False
+
+    assert source.fetch("prod") == Snapshot(1, {"search": True})
+    assert source.calls == ["prod", "prod"]
+
+
 @pytest.mark.parametrize(
     ("values", "key", "default", "expected"),
     [

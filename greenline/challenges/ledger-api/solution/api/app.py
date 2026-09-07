@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from api.store import LedgerStore
+from api.store import IdempotencyConflict, LedgerStore
 
 app = FastAPI(title="ledger-api")
 STORE = LedgerStore()
@@ -21,25 +21,18 @@ def create_entry(
     body: EntryIn,
     idempotency_key: str | None = Header(default=None),
 ) -> dict:
-    if idempotency_key is not None:
-        existing_id = STORE.idempotency.get(idempotency_key)
-        if existing_id is not None:
-            existing = STORE.entries[existing_id]
-            if (
-                existing["account"] != body.account
-                or existing["amount_cents"] != body.amount_cents
-                or existing["memo"] != body.memo
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="idempotency key already used for another request",
-                )
-            return existing
-
-    entry = STORE.add(body.account, body.amount_cents, body.memo)
-    if idempotency_key is not None:
-        STORE.idempotency[idempotency_key] = entry["id"]
-    return entry
+    try:
+        return STORE.create(
+            body.account,
+            body.amount_cents,
+            body.memo,
+            idempotency_key,
+        )
+    except IdempotencyConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="idempotency key already used for another request",
+        ) from None
 
 
 @app.get("/entries")
@@ -49,6 +42,7 @@ def list_entries() -> dict:
 
 @app.get("/entries/{entry_id}")
 def get_entry(entry_id: int) -> dict:
-    if entry_id not in STORE.entries:
+    entry = STORE.get(entry_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail="entry not found")
-    return STORE.entries[entry_id]
+    return entry

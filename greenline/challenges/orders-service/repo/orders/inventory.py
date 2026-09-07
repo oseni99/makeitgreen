@@ -6,15 +6,21 @@ allow stock to go below zero.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 
 
 class InsufficientStock(Exception):
     pass
 
 
+def _default_authorize(_sku: str) -> None:
+    time.sleep(0.001)
+
+
 class Inventory:
-    def __init__(self) -> None:
+    def __init__(self, authorize: Callable[[str], None] | None = None) -> None:
         self._stock: dict[str, int] = {}
+        self._authorize = authorize if authorize is not None else _default_authorize
 
     def add_stock(self, sku: str, qty: int) -> None:
         self._stock[sku] = self._stock.get(sku, 0) + qty
@@ -26,7 +32,5 @@ class Inventory:
         """Reserve qty units of sku, raising InsufficientStock if unavailable."""
         if self._stock.get(sku, 0) < qty:
             raise InsufficientStock(sku)
-        # Simulates I/O between the availability check and the write
-        # (e.g. a fraud check or payment authorization round-trip).
-        time.sleep(0.001)
+        self._authorize(sku)
         self._stock[sku] -= qty

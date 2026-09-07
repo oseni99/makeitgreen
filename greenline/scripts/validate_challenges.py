@@ -415,7 +415,15 @@ def validate_challenge(slug: str) -> bool:
                         f"   starting : {passed_tests}/{total_tests} pass"
                         f"  ({actual_percent:.1f}%, must be < {maximum_pass_percent:g}%)"
                     )
-                    if actual_percent >= maximum_pass_percent:
+                    if passed_tests == 0:
+                        print(
+                            _fail(
+                                f"{label}; pristine suite must retain at least one"
+                                " passing behavior"
+                            )
+                        )
+                        passed = False
+                    elif actual_percent >= maximum_pass_percent:
                         print(_fail(label))
                         passed = False
                     else:

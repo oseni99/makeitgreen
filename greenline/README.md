@@ -263,6 +263,12 @@ configuration uses Clerk with Google as the sole sign-in provider.
 1. Create `challenges/<slug>/challenge.json` (copy an existing one).
    Useful fields:
    - `order` — catalog sort key (lower first; default `999` if omitted)
+   - `minimum_tests` — minimum number of collected cases the solved suite must
+     pass. Medium challenges default to `15`.
+   - `maximum_pristine_pass_percent` — upper bound for the untouched starter's
+     passing percentage. Medium challenges default to `30`, and must remain
+     strictly below that percentage while retaining at least one passing
+     unrelated behavior.
    - `readonly` — path prefixes the user cannot edit (default `["tests/"]`)
    - `creatable` — optional prefixes where the user may add new files
      (e.g. `["orders/"]`)
@@ -272,7 +278,8 @@ configuration uses Clerk with Google as the sole sign-in provider.
      `{"kind":"node","command":["node","--test"],"report":"text"}`.
    - `variants` — optional additional language implementations. Each key is a
      lowercase variant ID and may override `language`, `runtime`, `readonly`,
-     `creatable`, `brief`, `blurb`, and `minutes`.
+     `creatable`, `brief`, `blurb`, `minutes`, `minimum_tests`, and
+     `maximum_pristine_pass_percent`.
    Every `conftest.py` and root pytest config stay read-only regardless.
 2. Put the broken repo in `repo/`. Python challenges use a pytest suite (and may use a
    root `conftest.py`); other runtimes use the command declared in `runtime`. In every
