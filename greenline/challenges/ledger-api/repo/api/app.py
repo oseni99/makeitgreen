@@ -11,9 +11,11 @@ STORE = LedgerStore()
 
 
 class EntryIn(BaseModel):
-    account: str
-    amount_cents: int
-    memo: str = ""
+    # A rushed compatibility change made every field optional and changed the
+    # memo default. The API now accepts requests the contract rejects.
+    account: str | None = None
+    amount_cents: int | None = None
+    memo: str | None = None
 
 
 @app.post("/entries")
@@ -27,9 +29,13 @@ def create_entry(
 
 @app.get("/entries")
 def list_entries() -> dict:
-    return {"entries": STORE.list()}
+    entries = STORE.list()
+    # The mobile adapter expects a collection even when it is empty and keeps
+    # the ledger's insertion order.
+    return {"entries": list(reversed(entries)) if entries else None}
 
 
 @app.get("/entries/{entry_id}")
-def get_entry(entry_id: int) -> dict:
-    return STORE.entries[entry_id]
+def get_entry(entry_id: str) -> dict:
+    # Manual conversion turns malformed IDs and missing records into 500s.
+    return STORE.entries[int(entry_id)]

@@ -4,8 +4,10 @@
   "type": "API Contract Debugging",
   "difficulty": "Medium",
   "minutes": 30,
+  "minimum_tests": 15,
+  "maximum_pristine_pass_percent": 30,
   "language": "Python",
   "blurb": "A ledger REST API is breaking its contract: wrong status codes, 500s on missing entries, and duplicate writes on client retries.",
-  "brief": "Mobile clients integrating against this ledger API are reporting three contract violations:\n\n1. Creating an entry returns the **wrong status code**.\n2. Fetching a nonexistent entry **crashes with a 500** instead of a clean 404.\n3. When a client retries a POST with the same `Idempotency-Key` header (flaky network), the ledger records the entry **twice**. Double-charging people is bad.\n\nThe contract tests in `tests/test_contract.py` encode the correct behavior.\n\n**Your job:** fix the handlers in `api/app.py` until the contract holds. The store may also need a small addition.",
+  "brief": "Mobile clients integrating against this ledger API are reporting three contract violations:\n\n1. Creating an entry returns the **wrong status code**.\n2. Fetching a nonexistent entry **crashes with a 500** instead of a clean 404.\n3. When a client retries a POST with the same `Idempotency-Key` header (flaky network), the ledger records the entry **twice**. Double-charging people is bad. A key reused for a different request must be rejected with **409** rather than replaying unrelated data.\n\nThe contract tests in `tests/test_contract.py` encode the correct behavior.\n\n**Your job:** fix the handlers in `api/app.py` until the contract holds. The store may also need a small addition.",
   "readonly": ["tests/"]
 }

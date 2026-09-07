@@ -4,9 +4,11 @@
   "type": "Concurrency",
   "difficulty": "Medium",
   "minutes": 25,
+  "minimum_tests": 15,
+  "maximum_pristine_pass_percent": 30,
   "language": "Python",
-  "blurb": "Concurrent checkouts are overselling inventory. Two tests pass, one goes deeply negative. Find the race, fix it, keep throughput.",
-  "brief": "This order service handles checkouts for a flash-sale platform. Under load, inventory counts go negative — customers are buying stock that doesn't exist.\n\nRun the tests. `test_processes_concurrent_checkouts` expects final inventory of 0, but gets a negative number.\n\n**Your job:** make all tests green without breaking the passing ones. The fix should still allow concurrent checkouts of *different* SKUs to proceed in parallel.",
+  "blurb": "Concurrent checkouts are overselling inventory. Find the race, preserve the order and stock contracts, and keep unrelated SKUs moving in parallel.",
+  "brief": "This order service handles checkouts for a flash-sale platform. Under load, inventory counts go negative — customers are buying stock that doesn't exist.\n\nThe test suite covers the working order, discount, stock, and checkout contracts as well as the failing concurrent path.\n\n**Your job:** make all tests green without breaking the passing behavior. The fix should still allow concurrent checkouts of *different* SKUs to proceed in parallel.",
   "readonly": ["tests/"],
   "creatable": ["orders/"],
   "variants": {

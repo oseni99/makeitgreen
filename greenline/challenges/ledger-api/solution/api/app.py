@@ -24,7 +24,17 @@ def create_entry(
     if idempotency_key is not None:
         existing_id = STORE.idempotency.get(idempotency_key)
         if existing_id is not None:
-            return STORE.entries[existing_id]
+            existing = STORE.entries[existing_id]
+            if (
+                existing["account"] != body.account
+                or existing["amount_cents"] != body.amount_cents
+                or existing["memo"] != body.memo
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="idempotency key already used for another request",
+                )
+            return existing
 
     entry = STORE.add(body.account, body.amount_cents, body.memo)
     if idempotency_key is not None:
