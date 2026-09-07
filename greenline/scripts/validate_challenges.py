@@ -53,6 +53,8 @@ VARIANT_OVERRIDE_FIELDS = {
     "brief",
     "blurb",
     "minutes",
+    "minimum_tests",
+    "maximum_pristine_pass_percent",
 }
 
 
@@ -75,6 +77,22 @@ def validate_documented_field_types(meta: dict[str, object]) -> None:
             or not all(isinstance(prefix, str) and prefix for prefix in value)
         ):
             raise ValueError(f"{field} must be an array of non-empty strings")
+    minimum_tests = meta.get("minimum_tests")
+    if "minimum_tests" in meta and (
+        isinstance(minimum_tests, bool)
+        or not isinstance(minimum_tests, int)
+        or minimum_tests < 1
+    ):
+        raise ValueError("minimum_tests must be a positive integer")
+    maximum_pass_percent = meta.get("maximum_pristine_pass_percent")
+    if "maximum_pristine_pass_percent" in meta and (
+        isinstance(maximum_pass_percent, bool)
+        or not isinstance(maximum_pass_percent, (int, float))
+        or not math.isfinite(maximum_pass_percent)
+        or maximum_pass_percent <= 0
+        or maximum_pass_percent > 100
+    ):
+        raise ValueError("maximum_pristine_pass_percent must be between 0 and 100")
 
 
 def discover_slugs() -> list[str]:
@@ -304,6 +322,48 @@ def _fail(label: str) -> str:
     return f"{label}  [FAIL]"
 
 
+def test_outcome_counts(output: str) -> tuple[int, int] | None:
+    """Read passed and collected counts from pytest summary or Node TAP output."""
+    node_total = re.findall(r"^# tests ([0-9]+)\s*$", output, flags=re.MULTILINE)
+    node_passed = re.findall(r"^# pass ([0-9]+)\s*$", output, flags=re.MULTILINE)
+    if node_total and node_passed:
+        return int(node_passed[-1]), int(node_total[-1])
+
+    outcome_pattern = re.compile(
+        r"(?<![\w])([0-9]+) (passed|failed|errors?|skipped|xfailed|xpassed)\b"
+    )
+    for line in reversed(output.splitlines()):
+        outcomes = outcome_pattern.findall(line)
+        if not outcomes:
+            continue
+        passed = sum(int(count) for count, outcome in outcomes if outcome == "passed")
+        total = sum(int(count) for count, _outcome in outcomes)
+        if total:
+            return passed, total
+    return None
+
+
+def passed_test_count(output: str) -> int | None:
+    counts = test_outcome_counts(output)
+    return counts[0] if counts is not None else None
+
+
+def quality_thresholds(meta: dict[str, object]) -> tuple[int | None, int | float | None]:
+    minimum_tests = meta.get("minimum_tests")
+    maximum_pass_percent = meta.get("maximum_pristine_pass_percent")
+    if meta.get("difficulty") == "Medium":
+        minimum_tests = minimum_tests if minimum_tests is not None else 15
+        maximum_pass_percent = (
+            maximum_pass_percent if maximum_pass_percent is not None else 30
+        )
+    return (
+        minimum_tests if isinstance(minimum_tests, int) else None,
+        maximum_pass_percent
+        if isinstance(maximum_pass_percent, (int, float))
+        else None,
+    )
+
+
 def validate_challenge(slug: str) -> bool:
     concept_slug, separator, variant_id = slug.partition(VARIANT_SEPARATOR)
     selected_variant = variant_id if separator else None
@@ -331,6 +391,7 @@ def validate_challenge(slug: str) -> bool:
         pristine = tmpdir / "pristine"
         copy_repo(repo, pristine)
         try:
+            meta = _variant_metadata(challenge, selected_variant)
             exit_code, output = (
                 run_suite(challenge, pristine)
                 if selected_variant is None
@@ -341,6 +402,24 @@ def validate_challenge(slug: str) -> bool:
             return False
         if exit_code == 1:
             print(_ok(f"   pristine : exit {exit_code}  (expected fail)"))
+            _minimum_tests, maximum_pass_percent = quality_thresholds(meta)
+            if maximum_pass_percent is not None:
+                counts = test_outcome_counts(output)
+                if counts is None:
+                    print(_fail("   starting : could not read pristine test counts"))
+                    passed = False
+                else:
+                    passed_tests, total_tests = counts
+                    actual_percent = passed_tests / total_tests * 100
+                    label = (
+                        f"   starting : {passed_tests}/{total_tests} pass"
+                        f"  ({actual_percent:.1f}%, must be < {maximum_pass_percent:g}%)"
+                    )
+                    if actual_percent >= maximum_pass_percent:
+                        print(_fail(label))
+                        passed = False
+                    else:
+                        print(_ok(label))
         else:
             print(_fail(f"   pristine : exit {exit_code}  (expected test-failure exit 1)"))
             print(_tail(output))
@@ -349,7 +428,6 @@ def validate_challenge(slug: str) -> bool:
         overlaid = tmpdir / "solution"
         copy_repo(repo, overlaid)
         try:
-            meta = _variant_metadata(challenge, selected_variant)
             overlay_solution(overlaid, solution, meta)
         except ProtectedSolutionPath as exc:
             print(_fail(f"   solution : protected path {exc}"))
@@ -361,6 +439,27 @@ def validate_challenge(slug: str) -> bool:
         )
         if exit_code == 0:
             print(_ok("   solution : exit 0  (expected pass)"))
+            minimum_tests, _maximum_pass_percent = quality_thresholds(meta)
+            if minimum_tests is not None:
+                actual_tests = passed_test_count(output)
+                if actual_tests is None:
+                    print(_fail("   coverage : could not read solved test count"))
+                    passed = False
+                elif actual_tests < minimum_tests:
+                    print(
+                        _fail(
+                            f"   coverage : {actual_tests} tests"
+                            f"  (minimum {minimum_tests})"
+                        )
+                    )
+                    passed = False
+                else:
+                    print(
+                        _ok(
+                            f"   coverage : {actual_tests} tests"
+                            f"  (minimum {minimum_tests})"
+                        )
+                    )
         else:
             print(_fail(f"   solution : exit {exit_code}  (expected pass)"))
             print(_tail(output))

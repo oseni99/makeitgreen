@@ -18,6 +18,12 @@ SPEC.loader.exec_module(validate_challenges)
     ("field", "value"),
     [
         ("minutes", "30"),
+        ("minimum_tests", 0),
+        ("minimum_tests", 14.5),
+        ("minimum_tests", "15"),
+        ("maximum_pristine_pass_percent", 0),
+        ("maximum_pristine_pass_percent", 101),
+        ("maximum_pristine_pass_percent", "30"),
         ("readonly", "tests/"),
         ("readonly", ["tests/", 1]),
         ("creatable", {"src/": True}),
@@ -75,6 +81,148 @@ def test_pristine_validator_accepts_normal_test_failure(
     monkeypatch.setattr(validate_challenges, "run_pytest", lambda _workdir: next(results))
 
     assert validate_challenges.validate_challenge("demo") is True
+
+
+def test_validator_rejects_solution_below_declared_test_minimum(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps({"difficulty": "Easy", "minimum_tests": 15})
+    )
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "1 failed, 13 passed"), (0, "14 passed in 0.01s")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_validator_accepts_solution_at_declared_test_minimum(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps({"difficulty": "Easy", "minimum_tests": 15})
+    )
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "1 failed, 14 passed"), (0, "15 passed in 0.01s")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is True
+
+
+def test_validator_rejects_pristine_suite_at_declared_pass_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps({"maximum_pristine_pass_percent": 30})
+    )
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "7 failed, 3 passed in 0.01s"), (0, "10 passed in 0.01s")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_validator_accepts_pristine_suite_below_declared_pass_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(
+        json.dumps({"maximum_pristine_pass_percent": 30})
+    )
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "8 failed, 2 passed in 0.01s"), (0, "10 passed in 0.01s")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is True
+
+
+def test_medium_challenges_inherit_catalog_quality_thresholds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(json.dumps({"difficulty": "Medium"}))
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "10 failed, 5 passed in 0.01s"), (0, "15 passed in 0.01s")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("13 failed, 5 passed, 1 warning in 0.19s", (5, 18)),
+        ("# tests 18\n# pass 5\n# fail 13\n", (5, 18)),
+    ],
+)
+def test_validator_reads_pristine_counts_from_supported_runtimes(
+    output: str,
+    expected: tuple[int, int],
+) -> None:
+    assert validate_challenges.test_outcome_counts(output) == expected
 
 
 def test_validator_rejects_solution_that_replaces_tests(
