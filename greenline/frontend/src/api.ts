@@ -82,6 +82,7 @@ export interface RunHistoryEntry extends RunMeta {
   output_tail: string
   output_truncated: boolean
   tests: TestCase[]
+  snapshot_available: boolean
 }
 
 export interface RunJobStart {
@@ -238,6 +239,11 @@ export const api = {
     req<{ runs: RunHistoryEntry[] }>(`/api/challenges/${slug}/runs`, {
       signal: opts?.signal,
     }).then((d) => d.runs),
+  restoreRun: (slug: string, runId: number) =>
+    req<{ ok: true; run_id: number; files_restored: number }>(
+      `/api/challenges/${slug}/runs/${runId}/restore`,
+      { method: 'POST' },
+    ),
   search: (slug: string, q: string) =>
     req<{ hits: SearchHit[] }>(
       `/api/challenges/${slug}/search?q=${encodeURIComponent(q)}`,

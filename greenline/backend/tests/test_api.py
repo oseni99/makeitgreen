@@ -341,6 +341,82 @@ def test_run_passes_start_time_and_truncation_state_to_history(
     assert response.status_code == 200
     assert captured["started_at"]
     assert captured["output_truncated"] is True
+    assert captured["workspace"] == {}
+
+
+def test_restore_run_replaces_workspace_with_its_exact_checkpoint(
+    isolated_api: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _create_challenge(
+        isolated_api,
+        "demo",
+        meta={"creatable": ["src/"]},
+        repo_files={"src/app.py": "answer = 'original'\n"},
+    )
+    monkeypatch.setattr(
+        api.app.state,
+        "execution_adapter",
+        FunctionExecutionAdapter(
+            lambda _run, _on_output: {
+                "green": False,
+                "exit_code": 1,
+                "output": "7 passed, 10 failed",
+                "tests": [],
+                "passed": 7,
+                "failed": 10,
+                "errors": 0,
+                "skipped": 0,
+            }
+        ),
+    )
+    client = TestClient(api.app)
+    client.put(
+        "/api/challenges/demo/files/src/app.py",
+        json={"content": "answer = 'checkpoint'\n"},
+    )
+    client.post(
+        "/api/challenges/demo/files/src/extra.py",
+        json={"content": "keep = True\n"},
+    )
+    run_id = client.post("/api/challenges/demo/run").json()["run"]["id"]
+    history_entry = client.get("/api/challenges/demo/runs").json()["runs"][0]
+    assert history_entry["snapshot_available"] is True
+    assert "workspace" not in history_entry
+
+    client.put(
+        "/api/challenges/demo/files/src/app.py",
+        json={"content": "answer = 'worse'\n"},
+    )
+    client.delete("/api/challenges/demo/files/src/extra.py")
+    client.post(
+        "/api/challenges/demo/files/src/temporary.py",
+        json={"content": "remove = True\n"},
+    )
+
+    restored = client.post(f"/api/challenges/demo/runs/{run_id}/restore")
+
+    assert restored.status_code == 200
+    assert restored.json() == {
+        "ok": True,
+        "run_id": run_id,
+        "files_restored": 2,
+    }
+    assert client.get("/api/challenges/demo/files/src/app.py").json()["content"] == (
+        "answer = 'checkpoint'\n"
+    )
+    assert client.get("/api/challenges/demo/files/src/extra.py").json()["content"] == (
+        "keep = True\n"
+    )
+    assert client.get("/api/challenges/demo/files/src/temporary.py").status_code == 404
+
+
+def test_restore_run_is_scoped_to_the_requested_challenge(isolated_api: Path) -> None:
+    _create_challenge(isolated_api, "demo")
+
+    response = TestClient(api.app).post("/api/challenges/demo/runs/999/restore")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "run not found"}
 
 
 def test_run_success_against_tiny_failing_challenge(isolated_api: Path) -> None:

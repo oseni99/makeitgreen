@@ -55,6 +55,7 @@ def test_list_runs_newest_first_with_payload() -> None:
         failed=2,
         output="FAIL stuff",
         tests=[{"id": "t::a", "outcome": "failed"}],
+        workspace={"src/answer.py": "answer = 1\n"},
     )
     progress.record_run("demo", green=True, duration_ms=80, passed=3)
 
@@ -67,6 +68,40 @@ def test_list_runs_newest_first_with_payload() -> None:
     assert runs[1]["duration_ms"] == 120
     assert runs[1]["tests"][0]["id"] == "t::a"
     assert "FAIL" in runs[1]["output_tail"]
+    assert runs[1]["snapshot_available"] is True
+
+
+def test_run_history_retains_only_the_latest_ten_checkpoints() -> None:
+    recorded = [
+        progress.record_run(
+            "demo",
+            green=False,
+            workspace={"answer.py": f"answer = {number}\n"},
+        )
+        for number in range(12)
+    ]
+
+    runs = progress.list_runs("demo", limit=200)
+
+    assert len(runs) == progress.RUN_HISTORY_LIMIT
+    assert [run["id"] for run in runs] == [item["id"] for item in recorded[-10:]][::-1]
+    assert runs[0]["snapshot_available"] is True
+    assert progress.get_all()["demo"]["attempts"] == 12
+    with pytest.raises(KeyError):
+        progress.run_workspace("demo", recorded[0]["id"])
+
+
+def test_run_workspace_returns_an_exact_copy_of_the_checkpoint() -> None:
+    run = progress.record_run(
+        "demo",
+        green=False,
+        workspace={"src/answer.py": "answer = 7\n", "src/extra.py": "extra = True\n"},
+    )
+
+    assert progress.run_workspace("demo", run["id"]) == {
+        "src/answer.py": "answer = 7\n",
+        "src/extra.py": "extra = True\n",
+    }
 
 
 def test_run_history_preserves_supplied_start_time() -> None:
@@ -152,7 +187,7 @@ def test_migrates_existing_db_missing_spoiled_column() -> None:
     assert marked["attempts"] == 2
 
 
-def test_migrates_existing_run_history_missing_truncation_column() -> None:
+def test_migrates_and_prunes_existing_run_history() -> None:
     conn = sqlite3.connect(progress.DB_PATH)
     conn.execute(
         """CREATE TABLE runs (
@@ -171,17 +206,42 @@ def test_migrates_existing_run_history_missing_truncation_column() -> None:
             tests_json TEXT NOT NULL DEFAULT '[]'
         )"""
     )
-    conn.execute(
+    legacy_rows = [
+        (
+            "old",
+            f"2026-08-30T04:05:{number:02d}+00:00",
+            f"legacy output {number}",
+        )
+        for number in range(12)
+    ] + [
+        (
+            "other",
+            f"2026-08-30T05:05:{number:02d}+00:00",
+            f"other output {number}",
+        )
+        for number in range(3)
+    ]
+    conn.executemany(
         "INSERT INTO runs (slug, started_at, output_tail) VALUES (?, ?, ?)",
-        ("old", "2026-08-30T04:05:06+00:00", "legacy output"),
+        legacy_rows,
     )
     conn.commit()
     conn.close()
 
-    run = progress.list_runs("old")[0]
+    runs = progress.list_runs("old", limit=200)
 
-    assert run["output_tail"] == "legacy output"
-    assert run["output_truncated"] is False
+    assert len(runs) == progress.RUN_HISTORY_LIMIT
+    assert runs[0]["output_tail"] == "legacy output 11"
+    assert runs[-1]["output_tail"] == "legacy output 2"
+    assert runs[0]["output_truncated"] is False
+    assert runs[0]["snapshot_available"] is False
+    with sqlite3.connect(progress.DB_PATH) as migrated:
+        counts = dict(
+            migrated.execute(
+                "SELECT slug, count(*) FROM runs GROUP BY slug ORDER BY slug"
+            ).fetchall()
+        )
+    assert counts == {"old": progress.RUN_HISTORY_LIMIT, "other": 3}
 
 
 def test_concurrent_sqlite_calls_do_not_crash() -> None:

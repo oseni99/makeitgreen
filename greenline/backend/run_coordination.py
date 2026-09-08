@@ -76,6 +76,7 @@ class RunCompletion:
     started_at: str
     duration_ms: int
     result: Mapping[str, Any]
+    workspace: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -447,8 +448,8 @@ class PostgresRunJobAdapter:
             run = conn.execute(
                 "INSERT INTO challenge_runs (user_id, slug, started_at, duration_ms, "
                 "session_elapsed_ms, green, passed, failed, errors, skipped, exit_code, "
-                "output_tail, output_truncated, tests) VALUES "
-                "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "output_tail, output_truncated, tests, workspace_snapshot) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) "
                 "RETURNING id",
                 (
                     claim.user_id,
@@ -466,8 +467,21 @@ class PostgresRunJobAdapter:
                     bool(result.get("output_truncated"))
                     or len(output) > len(history_tail),
                     json.dumps(result.get("tests") or []),
+                    json.dumps(dict(completion.workspace), sort_keys=True),
                 ),
             ).fetchone()
+            conn.execute(
+                "DELETE FROM challenge_runs WHERE user_id = %s AND slug = %s "
+                "AND id NOT IN (SELECT id FROM challenge_runs WHERE user_id = %s "
+                "AND slug = %s ORDER BY id DESC LIMIT %s)",
+                (
+                    claim.user_id,
+                    claim.slug,
+                    claim.user_id,
+                    claim.slug,
+                    progress.RUN_HISTORY_LIMIT,
+                ),
+            )
             conn.execute(
                 "INSERT INTO product_events "
                 "(user_id, event_name, slug, dedupe_key) "
@@ -669,6 +683,7 @@ class RunJobWorker:
                     started_at=started_at,
                     duration_ms=int((time.monotonic() - started) * 1000),
                     result=result,
+                    workspace=dict(snapshot.files),
                 ),
             )
         except StaleRunJobClaim:

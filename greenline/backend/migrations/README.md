@@ -17,6 +17,8 @@ psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/004_worker_releases.sql
 psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/005_beta_learning_loop.sql
+psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
+  --file backend/migrations/006_run_checkpoints.sql
 ```
 
 `PostgresLearnerStateAdapter.check_ready()` verifies the exact schema version
@@ -38,3 +40,7 @@ the control plane uses the rows for listener-free exact-release readiness.
 
 Migration 005 adds tenant-scoped prep-path preferences, post-solve debriefs and
 feedback, plus bounded first-party product events for the beta learning loop.
+
+Migration 006 stores the exact workspace overlay used by each run, trims each
+learner's per-challenge history to the latest 10 checkpoints, and enables safe
+workspace restoration from those checkpoints.

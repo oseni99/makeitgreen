@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from learner_state import PostgresLearnerStateAdapter
+from learner_state import SCHEMA_VERSION, PostgresLearnerStateAdapter
 from run_coordination import PostgresRunJobAdapter
 import runner
 from worker import (
@@ -23,7 +23,7 @@ IMAGE_DIGEST = "sha256:" + "a" * 64
 
 class _ReadyCursor:
     def fetchone(self) -> dict[str, int]:
-        return {"version": 5}
+        return {"version": SCHEMA_VERSION}
 
 
 class _ReadyConnection:

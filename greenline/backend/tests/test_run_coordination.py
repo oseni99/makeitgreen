@@ -175,7 +175,7 @@ def test_release_status_rejects_mixed_or_inconsistent_live_workers() -> None:
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-5 PostgreSQL integration database",
+    reason="requires a schema-version-6 PostgreSQL integration database",
 )
 def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]
@@ -213,6 +213,7 @@ def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -
                     "output": "one test passed\n",
                     "tests": [],
                 },
+                workspace={"answer.py": "answer = 42\n"},
             ),
         )
 
@@ -220,6 +221,7 @@ def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["result"]["run"]["session_elapsed_ms"] == 1200
+        assert state.list_runs(slug, 10, user_id)[0]["snapshot_available"] is True
         assert producer.get(queued["job_id"], user_id="another-user") is None
         assert state.get_all(user_id)[slug]["status"] == "solved"
         event_names = [
@@ -243,7 +245,7 @@ def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-5 PostgreSQL integration database",
+    reason="requires a schema-version-6 PostgreSQL integration database",
 )
 def test_postgres_run_admission_enforces_per_user_capacity_across_challenges() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]

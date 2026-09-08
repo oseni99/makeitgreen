@@ -24,6 +24,7 @@ import abuse_controls
 import auth
 import learner_state
 import operations
+import progress
 import run_coordination
 import runner
 from challenge_locks import acquire_challenge, challenge_operation
@@ -984,6 +985,7 @@ def _execute_run(
         tests=result.get("tests"),
         started_at=started_at,
         output_truncated=result.get("output_truncated", False),
+        workspace=dict(workspace.files),
     )
     result["run"] = run_meta
     result["duration_ms"] = duration_ms
@@ -1040,7 +1042,7 @@ def get_run_job(job_id: str, after: int = 0, request: Request = None) -> dict:  
 
 
 @router.get("/api/challenges/{slug}/runs")
-def get_runs(slug: str, limit: int = 50, request: Request = None) -> dict:  # type: ignore[assignment]
+def get_runs(slug: str, limit: int = progress.RUN_HISTORY_LIMIT, request: Request = None) -> dict:  # type: ignore[assignment]
     try:
         ch.load(slug)
     except ch.ChallengeNotFound:
@@ -1050,6 +1052,25 @@ def get_runs(slug: str, limit: int = 50, request: Request = None) -> dict:  # ty
             slug, limit, request_user_id(request)
         )
     }
+
+
+@router.post("/api/challenges/{slug}/runs/{run_id}/restore")
+def restore_run(slug: str, run_id: int, request: Request = None) -> dict:  # type: ignore[assignment]
+    with challenge_operation(slug):
+        try:
+            ch.load(slug)
+            snapshot = request_learner_state(request).restore_run(
+                slug, run_id, request_user_id(request)
+            )
+        except ch.ChallengeNotFound:
+            raise HTTPException(404, "challenge not found")
+        except learner_state.RunNotFound:
+            raise HTTPException(404, "run not found")
+        except learner_state.RunSnapshotUnavailable:
+            raise HTTPException(409, "code snapshot unavailable for this run")
+        except ch.InvalidPath:
+            raise HTTPException(409, "code snapshot is no longer compatible")
+    return {"ok": True, "run_id": run_id, "files_restored": len(snapshot.files)}
 
 
 @router.post("/api/challenges/{slug}/reset")

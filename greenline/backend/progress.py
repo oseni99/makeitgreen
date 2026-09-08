@@ -1,8 +1,8 @@
 """SQLite progress store: attempts, solved status, spoil flag, and per-run history.
 
 Attempts semantics (#26): every POST /run increments attempts, including
-reruns after the challenge is already solved. History rows are kept for every
-run; reset clears both progress and run history for that slug.
+reruns after the challenge is already solved. The latest ten runs are retained
+as restorable checkpoints; reset clears both progress and run history for that slug.
 
 `spoiled` is set when the learner chooses to view the solution (soft confirm
 on the client). It never changes status, attempts, or solved_at.
@@ -22,6 +22,7 @@ DB_PATH = Path(__file__).resolve().parent / "data" / "progress.db"
 
 # Cap stored output so the DB doesn't grow unbounded from huge traces.
 OUTPUT_TAIL_LIMIT = 8000
+RUN_HISTORY_LIMIT = 10
 PREP_PATHS = frozenset({"foundations", "distributed", "debugging", "senior"})
 
 _SCHEMA_LOCK = threading.Lock()
@@ -93,7 +94,8 @@ def _initialize_schema(path: Path) -> None:
                 exit_code INTEGER NOT NULL DEFAULT 0,
                 output_tail TEXT NOT NULL DEFAULT '',
                 output_truncated INTEGER NOT NULL DEFAULT 0,
-                tests_json TEXT NOT NULL DEFAULT '[]'
+                tests_json TEXT NOT NULL DEFAULT '[]',
+                workspace_json TEXT
             )"""
         )
         try:
@@ -104,8 +106,21 @@ def _initialize_schema(path: Path) -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
+        try:
+            conn.execute("ALTER TABLE runs ADD COLUMN workspace_json TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_slug_id ON runs (slug, id DESC)"
+        )
+        conn.execute(
+            "WITH ranked AS ("
+            "SELECT id, row_number() OVER (PARTITION BY slug ORDER BY id DESC) AS position "
+            "FROM runs) "
+            "DELETE FROM runs WHERE id IN ("
+            "SELECT id FROM ranked WHERE position > ?)",
+            (RUN_HISTORY_LIMIT,),
         )
         conn.execute(
             """CREATE TABLE IF NOT EXISTS preferences (
@@ -243,6 +258,7 @@ def record_run(
     tests: list[dict[str, Any]] | None = None,
     started_at: str | None = None,
     output_truncated: bool = False,
+    workspace: dict[str, str] | None = None,
     user_id: str | None = None,
 ) -> dict[str, Any]:
     """Increment attempts (always), update solved status, append a history row."""
@@ -251,6 +267,9 @@ def record_run(
     output_tail = output[-OUTPUT_TAIL_LIMIT:]
     history_output_truncated = output_truncated or len(output) > OUTPUT_TAIL_LIMIT
     tests_json = json.dumps(tests or [])
+    workspace_json = (
+        None if workspace is None else json.dumps(workspace, sort_keys=True)
+    )
 
     with _conn(user_id) as conn:
         conn.execute(
@@ -278,8 +297,8 @@ def record_run(
             """INSERT INTO runs (
                 slug, started_at, duration_ms, session_elapsed_ms, green,
                 passed, failed, errors, skipped, exit_code, output_tail,
-                output_truncated, tests_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                output_truncated, tests_json, workspace_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 slug,
                 run_started_at,
@@ -294,9 +313,15 @@ def record_run(
                 output_tail,
                 1 if history_output_truncated else 0,
                 tests_json,
+                workspace_json,
             ),
         )
         run_id = cur.lastrowid
+        conn.execute(
+            "DELETE FROM runs WHERE slug = ? AND id NOT IN "
+            "(SELECT id FROM runs WHERE slug = ? ORDER BY id DESC LIMIT ?)",
+            (slug, slug, RUN_HISTORY_LIMIT),
+        )
         _record_event(
             conn,
             "first_run",
@@ -326,13 +351,15 @@ def record_run(
     }
 
 
-def list_runs(slug: str, limit: int = 50, user_id: str | None = None) -> list[dict[str, Any]]:
-    limit = max(1, min(int(limit), 200))
+def list_runs(
+    slug: str, limit: int = RUN_HISTORY_LIMIT, user_id: str | None = None
+) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), RUN_HISTORY_LIMIT))
     with _conn(user_id) as conn:
         rows = conn.execute(
             """SELECT id, slug, started_at, duration_ms, session_elapsed_ms, green,
                       passed, failed, errors, skipped, exit_code, output_tail,
-                      output_truncated, tests_json
+                      output_truncated, tests_json, workspace_json
                FROM runs WHERE slug = ? ORDER BY id DESC LIMIT ?""",
             (slug, limit),
         ).fetchall()
@@ -358,9 +385,34 @@ def list_runs(slug: str, limit: int = 50, user_id: str | None = None) -> list[di
                 "output_tail": r["output_tail"],
                 "output_truncated": bool(r["output_truncated"]),
                 "tests": tests,
+                "snapshot_available": r["workspace_json"] is not None,
             }
         )
     return out
+
+
+def run_workspace(
+    slug: str, run_id: int, user_id: str | None = None
+) -> dict[str, str]:
+    with _conn(user_id) as conn:
+        row = conn.execute(
+            "SELECT workspace_json FROM runs WHERE slug = ? AND id = ?",
+            (slug, run_id),
+        ).fetchone()
+    if row is None:
+        raise KeyError(run_id)
+    if row["workspace_json"] is None:
+        raise ValueError("run does not have a workspace snapshot")
+    try:
+        workspace = json.loads(row["workspace_json"])
+    except json.JSONDecodeError as exc:
+        raise ValueError("run workspace snapshot is invalid") from exc
+    if not isinstance(workspace, dict) or not all(
+        isinstance(path, str) and isinstance(content, str)
+        for path, content in workspace.items()
+    ):
+        raise ValueError("run workspace snapshot is invalid")
+    return workspace
 
 
 def mark_spoiled(slug: str, user_id: str | None = None) -> dict[str, Any]:

@@ -12,7 +12,7 @@ import hashlib
 import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CHALLENGES_DIR = BASE_DIR / "challenges"
@@ -482,6 +482,44 @@ def reset_workspace(slug: str, user_id: str | None = None) -> None:
     load(slug)
     if ws.is_dir():
         shutil.rmtree(ws)
+
+
+def validated_workspace_snapshot(
+    slug: str, files: Mapping[str, str]
+) -> dict[str, str]:
+    """Validate a stored overlay snapshot against the current challenge policy."""
+    meta = load(slug)
+    root = repo_dir(slug)
+    requirements_path = (meta.get("runtime") or {}).get("requirements")
+    validated: dict[str, str] = {}
+    for path, content in files.items():
+        if not isinstance(path, str) or not isinstance(content, str):
+            raise InvalidPath(str(path))
+        repo_file, canonical = _safe_relpath(root, path)
+        if (
+            canonical != path
+            or any(part in IGNORED for part in Path(path).parts)
+            or is_readonly(meta, canonical)
+            or canonical == requirements_path
+            or (not repo_file.is_file() and not is_creatable(meta, canonical))
+        ):
+            raise InvalidPath(path)
+        validated[canonical] = content
+    return validated
+
+
+def restore_workspace(
+    slug: str, files: Mapping[str, str], user_id: str | None = None
+) -> dict[str, str]:
+    """Replace all learner overlays with one previously validated run snapshot."""
+    validated = validated_workspace_snapshot(slug, files)
+    reset_workspace(slug, user_id)
+    ws = workspace_dir(slug, user_id)
+    for path, content in validated.items():
+        target, _ = _safe_relpath(ws, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return validated
 
 
 def solution_files(slug: str) -> dict[str, Any]:

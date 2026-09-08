@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from abuse_controls import PostgresAbuseControlAdapter
 from app import CompositionError, HostedAdapters, create_application
-from learner_state import PostgresLearnerStateAdapter
+from learner_state import SCHEMA_VERSION, PostgresLearnerStateAdapter
 from run_coordination import PostgresRunJobAdapter
 from runner import DisabledExecutionAdapter
 OPERATIONS = {
@@ -26,7 +26,7 @@ class _ReadyCursor:
         self.query = query
 
     def fetchone(self) -> dict[str, int]:
-        return {"version": 5}
+        return {"version": SCHEMA_VERSION}
 
     def fetchall(self) -> list[dict[str, str]]:
         if "FROM worker_releases" not in self.query:

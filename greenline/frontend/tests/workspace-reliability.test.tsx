@@ -73,11 +73,13 @@ function installServer({
   includeNewFile = false,
   runResult = {},
   streamBeforeComplete = false,
+  historyRuns = [],
 }: {
   failSecondFile?: boolean
   includeNewFile?: boolean
   runResult?: Record<string, unknown>
   streamBeforeComplete?: boolean
+  historyRuns?: Array<Record<string, unknown>>
 } = {}) {
   const saves: Array<{
     url: string
@@ -90,11 +92,12 @@ function installServer({
   }> = []
   let runNumber = 0
   let jobPolls = 0
+  let source = 'original source'
 
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     const method = init?.method ?? 'GET'
-    if (url.endsWith('/runs') && method === 'GET') return json({ runs: [] })
+    if (url.endsWith('/runs') && method === 'GET') return json({ runs: historyRuns })
     if (url.endsWith('/runs') && method === 'POST') {
       runNumber += 1
       return json({ job_id: `job-${runNumber}`, slug: 'orders-service', status: 'queued' })
@@ -128,6 +131,13 @@ function installServer({
         },
       })
     }
+    const restoreMatch = url.match(/\/runs\/(\d+)\/restore$/)
+    if (restoreMatch && method === 'POST') {
+      const run = historyRuns.find((item) => item.id === Number(restoreMatch[1]))
+      const workspace = run?.workspace as Record<string, string> | undefined
+      source = workspace?.['orders/service.py'] ?? 'original source'
+      return json({ ok: true, run_id: Number(restoreMatch[1]), files_restored: Object.keys(workspace ?? {}).length })
+    }
     if (url.startsWith('/api/challenges/orders-service/search?') && method === 'GET') {
       const response = deferred<Response>()
       searches.push({
@@ -137,7 +147,7 @@ function installServer({
       return response.promise
     }
     if (url.endsWith('/files/orders/service.py') && method === 'GET') {
-      return json({ content: 'original source' })
+      return json({ content: source })
     }
     if (url.endsWith('/files/orders/other.py') && method === 'GET') {
       return failSecondFile
@@ -152,9 +162,15 @@ function installServer({
     }
     if (url.includes('/files/') && method === 'PUT') {
       const response = deferred<Response>()
+      const content = JSON.parse(String(init?.body)).content
+      const resolve = response.resolve
+      response.resolve = (value) => {
+        source = content
+        resolve(value)
+      }
       saves.push({
         url,
-        content: JSON.parse(String(init?.body)).content,
+        content,
         response,
       })
       return response.promise
@@ -340,6 +356,121 @@ describe('workspace reliability', () => {
 
     await user.click(screen.getByRole('button', { name: /history/i }))
     expect(screen.getByRole('separator', { name: 'Resize test output' })).toBeTruthy()
+  })
+
+  it('restores the exact code snapshot from a selected run', async () => {
+    const checkpoint = {
+      id: 7,
+      slug: 'orders-service',
+      started_at: '2026-09-07T12:00:00Z',
+      duration_ms: 20,
+      session_elapsed_ms: 1000,
+      green: false,
+      passed: 7,
+      failed: 10,
+      errors: 0,
+      skipped: 0,
+      exit_code: 1,
+      output_tail: '7 passed, 10 failed',
+      output_truncated: false,
+      tests: [],
+      snapshot_available: true,
+      workspace: { 'orders/service.py': 'checkpoint source' },
+    }
+    const { fetchMock } = installServer({ historyRuns: [checkpoint] })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+    await replaceEditorText(user, 'worse source')
+
+    await user.click(screen.getByRole('button', { name: /history/i }))
+    await user.click(await screen.findByRole('button', { name: 'Restore code from run 7' }))
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Restore code from run 7? Your current workspace files will be replaced.',
+    )
+    expect(await screen.findByDisplayValue('checkpoint source')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/challenges/orders-service/runs/7/restore',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(await screen.findByText(/7 passed, 10 failed/)).toBeTruthy()
+    confirm.mockRestore()
+  })
+
+  it('waits for an in-flight save before restoring a run checkpoint', async () => {
+    const checkpoint = {
+      id: 7,
+      slug: 'orders-service',
+      started_at: '2026-09-07T12:00:00Z',
+      duration_ms: 20,
+      session_elapsed_ms: 1000,
+      green: false,
+      passed: 7,
+      failed: 10,
+      errors: 0,
+      skipped: 0,
+      exit_code: 1,
+      output_tail: '7 passed, 10 failed',
+      output_truncated: false,
+      tests: [],
+      snapshot_available: true,
+      workspace: { 'orders/service.py': 'checkpoint source' },
+    }
+    const { fetchMock, saves } = installServer({ historyRuns: [checkpoint] })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+    await replaceEditorText(user, 'unsaved source')
+
+    await editorHarness.save?.()
+    await waitFor(() => expect(saves).toHaveLength(1))
+    await user.click(screen.getByRole('button', { name: /history/i }))
+    await user.click(await screen.findByRole('button', { name: 'Restore code from run 7' }))
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/challenges/orders-service/runs/7/restore',
+      expect.anything(),
+    )
+
+    saves[0].response.resolve(json({ ok: true }))
+
+    expect(await screen.findByDisplayValue('checkpoint source')).toBeTruthy()
+    const restoredRead = await fetch('/api/challenges/orders-service/files/orders/service.py')
+    expect(await restoredRead.json()).toEqual({ content: 'checkpoint source' })
+  })
+
+  it('shows at most the latest ten run checkpoints', async () => {
+    const historyRuns = Array.from({ length: 12 }, (_, index) => ({
+      id: 12 - index,
+      slug: 'orders-service',
+      started_at: '2026-09-07T12:00:00Z',
+      duration_ms: 20,
+      session_elapsed_ms: 1000,
+      green: false,
+      passed: index,
+      failed: 17 - index,
+      errors: 0,
+      skipped: 0,
+      exit_code: 1,
+      output_tail: 'failed',
+      output_truncated: false,
+      tests: [],
+      snapshot_available: true,
+      workspace: { 'orders/service.py': `checkpoint ${12 - index}` },
+    }))
+    installServer({ historyRuns })
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('button', { name: /history/i }))
+
+    expect(await screen.findByRole('button', { name: /history \(10\)/i })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /Restore code from run/ })).toHaveLength(10)
+    expect(screen.queryByRole('button', { name: 'Restore code from run 2' })).toBeNull()
   })
 
   it('saves an edit made while save-all is in flight on the next run', async () => {

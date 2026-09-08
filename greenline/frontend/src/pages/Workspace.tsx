@@ -205,10 +205,16 @@ function HistoryRow({
   run,
   selected,
   onSelect,
+  onRestore,
+  restoring,
+  restoreDisabled,
 }: {
   run: RunHistoryEntry
   selected: boolean
   onSelect: () => void
+  onRestore: () => void
+  restoring: boolean
+  restoreDisabled: boolean
 }) {
   const when = new Date(run.started_at).toLocaleTimeString([], {
     hour: '2-digit',
@@ -216,30 +222,45 @@ function HistoryRow({
     second: '2-digit',
   })
   return (
-    <button
-      type="button"
+    <div
       className={cn(
-        'grid w-full grid-cols-[20px_64px_minmax(100px,1fr)] items-center gap-2 border-b px-4 py-2.5 text-left font-mono text-xs transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[20px_72px_minmax(120px,1fr)_64px_82px]',
+        'grid grid-cols-[minmax(0,1fr)_auto] items-center border-b transition-colors hover:bg-muted/70',
         selected && 'bg-primary/8',
       )}
-      onClick={onSelect}
     >
-      <span className={run.green ? 'text-success' : 'text-destructive'}>
-        {run.green ? '✓' : '✗'}
-      </span>
-      <span className="text-muted-foreground">{when}</span>
-      <span className="truncate text-foreground">
-        {run.green
-          ? `${run.passed} passed`
-          : formatUnsuccessfulRun(run)}
-      </span>
-      <span className="hidden text-right text-muted-foreground sm:block" title="pytest wall time">
-        {run.duration_ms}ms
-      </span>
-      <span className="hidden text-right text-muted-foreground sm:block" title="session timer at run">
-        ⏱ {formatSession(run.session_elapsed_ms)}
-      </span>
-    </button>
+      <button
+        type="button"
+        className="grid min-w-0 grid-cols-[20px_64px_minmax(100px,1fr)] items-center gap-2 px-4 py-2.5 text-left font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[20px_72px_minmax(120px,1fr)_64px_82px]"
+        onClick={onSelect}
+        aria-label={`View run ${run.id}: ${formatUnsuccessfulRun(run)}`}
+      >
+        <span className={run.green ? 'text-success' : 'text-destructive'}>
+          {run.green ? '✓' : '✗'}
+        </span>
+        <span className="text-muted-foreground">{when}</span>
+        <span className="truncate text-foreground">
+          {run.green
+            ? `${run.passed} passed`
+            : formatUnsuccessfulRun(run)}
+        </span>
+        <span className="hidden text-right text-muted-foreground sm:block" title="pytest wall time">
+          {run.duration_ms}ms
+        </span>
+        <span className="hidden text-right text-muted-foreground sm:block" title="session timer at run">
+          ⏱ {formatSession(run.session_elapsed_ms)}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="mr-3 rounded border border-border px-2 py-1 font-mono text-[10px] font-semibold text-muted-foreground hover:border-primary/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        onClick={onRestore}
+        disabled={!run.snapshot_available || restoreDisabled}
+        title={!run.snapshot_available ? 'Code snapshot unavailable for this older run' : `Restore code from run ${run.id}`}
+        aria-label={`Restore code from run ${run.id}`}
+      >
+        {restoring ? 'RESTORING…' : 'RESTORE'}
+      </button>
+    </div>
   )
 }
 
@@ -340,6 +361,8 @@ export default function Workspace() {
   const [runsLoading, setRunsLoading] = useState(false)
   const [runsError, setRunsError] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
+  const [restoringRunId, setRestoringRunId] = useState<number | null>(null)
+  const [restoreError, setRestoreError] = useState('')
   const [newPath, setNewPath] = useState('')
   const [fileOpError, setFileOpError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -357,6 +380,9 @@ export default function Workspace() {
   const pendingRevealRef = useRef<{ path: string; line: number } | null>(null)
   const searchRequestRef = useRef(0)
   const saveCurrentRef = useRef<() => Promise<void>>(async () => {})
+  const pendingSavesRef = useRef(new Set<Promise<unknown>>())
+  const restoreInProgressRef = useRef(false)
+  const runInProgressRef = useRef(false)
   const skipUnsavedRef = useRef(false)
   const outputSectionRef = useRef<HTMLElement | null>(null)
   const outputResizeRef = useRef<{
@@ -481,7 +507,7 @@ export default function Workspace() {
       try {
         const list = await api.listRuns(slug, { signal })
         if (signal?.aborted) return
-        setRuns(list)
+        setRuns(list.slice(0, 10))
       } catch (err) {
         if (isAbortError(err)) return
         console.error(err)
@@ -553,7 +579,18 @@ export default function Workspace() {
     })
   }
 
+  function trackedSave(path: string, content: string) {
+    const request = api.saveFile(slug, path, content)
+    pendingSavesRef.current.add(request)
+    void request.then(
+      () => pendingSavesRef.current.delete(request),
+      () => pendingSavesRef.current.delete(request),
+    )
+    return request
+  }
+
   async function saveAll() {
+    if (restoreInProgressRef.current) return
     const paths = [...dirtyRef.current].filter((p) => {
       const meta = challenge?.files.find((f) => f.path === p)
       return !meta?.readonly
@@ -573,7 +610,7 @@ export default function Workspace() {
       return
     }
     const pending = paths.map((path) => ({ path, content: contentsRef.current[path] ?? '' }))
-    await Promise.all(pending.map(({ path, content }) => api.saveFile(slug, path, content)))
+    await Promise.all(pending.map(({ path, content }) => trackedSave(path, content)))
     setDirty((d) => {
       const next = new Set(d)
       for (const { path, content } of pending) {
@@ -595,12 +632,13 @@ export default function Workspace() {
   }
 
   async function saveCurrent() {
+    if (restoreInProgressRef.current) return
     const path = openPathRef.current
     if (!path || !dirtyRef.current.has(path)) return
     const meta = challenge?.files.find((f) => f.path === path)
     if (meta?.readonly) return
     const content = contentsRef.current[path] ?? ''
-    await api.saveFile(slug, path, content)
+    await trackedSave(path, content)
     const savedCurrentContent = contentsRef.current[path] === content
     setDirty((d) => {
       const next = new Set(d)
@@ -676,11 +714,14 @@ export default function Workspace() {
   )
 
   async function runTests() {
+    if (restoreInProgressRef.current || runInProgressRef.current) return
+    runInProgressRef.current = true
     setRunning(true)
     setOutputOpen(true)
     setDrawerTab('results')
     try {
       await saveAll()
+      if (restoreInProgressRef.current) return
       const sessionMs = timer && timer.status !== 'idle' ? elapsedMs(timer) : undefined
       const job = await api.startRun(slug, sessionMs)
       let offset = 0
@@ -747,6 +788,7 @@ export default function Workspace() {
         skipped: 0,
       })
     } finally {
+      runInProgressRef.current = false
       setRunning(false)
     }
   }
@@ -804,6 +846,8 @@ export default function Workspace() {
     setRunsLoading(false)
     setRunsError(false)
     setSelectedRunId(null)
+    setRestoringRunId(null)
+    setRestoreError('')
     setSearchHits([])
     setTimer(clearTimer(slug, challenge?.minutes ?? timer?.durationMinutes ?? 25))
     await load()
@@ -825,6 +869,46 @@ export default function Workspace() {
       run,
     })
     setDrawerTab('results')
+  }
+
+  async function restoreHistoricalRun(run: RunHistoryEntry) {
+    if (
+      !run.snapshot_available ||
+      restoreInProgressRef.current ||
+      runInProgressRef.current
+    ) return
+    const confirmed = window.confirm(
+      `Restore code from run ${run.id}? Your current workspace files will be replaced.`,
+    )
+    if (!confirmed) return
+
+    restoreInProgressRef.current = true
+    setRestoringRunId(run.id)
+    setRestoreError('')
+    try {
+      await Promise.allSettled([...pendingSavesRef.current])
+      await api.restoreRun(slug, run.id)
+      contentsRef.current = {}
+      dirtyRef.current = new Set()
+      openPathRef.current = ''
+      setContents({})
+      setDirty(new Set())
+      setOpenTabs([])
+      setOpenPath('')
+      setSearchHits([])
+
+      const detail = await api.getChallenge(slug)
+      setChallenge(detail)
+      const first = selectInitialEditableFile(detail.files)
+      if (first) await openFile(first.path)
+      showHistoricalRun(run)
+    } catch (err) {
+      console.error(err)
+      setRestoreError('could not restore this run’s code snapshot')
+    } finally {
+      restoreInProgressRef.current = false
+      setRestoringRunId(null)
+    }
   }
 
   if (loadError) {
@@ -919,7 +1003,7 @@ export default function Workspace() {
           >
             Solution
           </Link>
-          <Button type="button" variant="primary" size="sm" className="px-4 max-sm:min-h-11" onClick={runTests} disabled={running}>
+          <Button type="button" variant="primary" size="sm" className="px-4 max-sm:min-h-11" onClick={runTests} disabled={running || restoringRunId !== null}>
             {running ? 'Running…' : '▶ Run tests'}
           </Button>
         </div>
@@ -1336,6 +1420,11 @@ export default function Workspace() {
             {outputOpen &&
               (drawerTab === 'history' ? (
                 <div className="h-[calc(100%_-_2.5rem)] overflow-auto">
+                  {restoreError && (
+                    <div className="border-b border-destructive/20 px-4 py-2 text-xs text-destructive">
+                      {restoreError}
+                    </div>
+                  )}
                   {runsLoading ? (
                     <div className="p-5 text-xs text-muted-foreground">loading run history…</div>
                   ) : runsError ? (
@@ -1354,6 +1443,9 @@ export default function Workspace() {
                         run={run}
                         selected={run.id === selectedRunId}
                         onSelect={() => showHistoricalRun(run)}
+                        onRestore={() => void restoreHistoricalRun(run)}
+                        restoring={restoringRunId === run.id}
+                        restoreDisabled={restoringRunId !== null || running}
                       />
                     ))
                   )}

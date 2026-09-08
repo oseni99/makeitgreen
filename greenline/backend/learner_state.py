@@ -12,7 +12,7 @@ import challenges
 import progress
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 PREP_PATHS = frozenset({"foundations", "distributed", "debugging", "senior"})
 
 
@@ -32,6 +32,14 @@ class LearnerChallengeBusy(RuntimeError):
 
 class DebriefRequiresSolved(RuntimeError):
     """A learner may debrief only after completing the Challenge Run."""
+
+
+class RunNotFound(LookupError):
+    """The requested run does not belong to this learner and challenge."""
+
+
+class RunSnapshotUnavailable(RuntimeError):
+    """The run predates durable workspace snapshots and cannot be restored."""
 
 
 def _validated_debrief(values: Mapping[str, Any]) -> dict[str, Any]:
@@ -73,6 +81,9 @@ class LearnerStateAdapter(Protocol):
     def snapshot(self, slug: str, user_id: str | None) -> WorkspaceSnapshot: ...
     def record_run(self, slug: str, user_id: str | None, **values: Any) -> dict[str, Any]: ...
     def list_runs(self, slug: str, limit: int, user_id: str | None) -> list[dict[str, Any]]: ...
+    def restore_run(
+        self, slug: str, run_id: int, user_id: str | None
+    ) -> WorkspaceSnapshot: ...
     def mark_spoiled(self, slug: str, user_id: str | None) -> dict[str, Any]: ...
     def reset(self, slug: str, user_id: str | None) -> None: ...
     def get_preferences(self, user_id: str | None) -> dict[str, Any]: ...
@@ -132,6 +143,18 @@ class LocalLearnerStateAdapter:
         self, slug: str, limit: int, user_id: str | None
     ) -> list[dict[str, Any]]:
         return progress.list_runs(slug, limit=limit, user_id=user_id)
+
+    def restore_run(
+        self, slug: str, run_id: int, user_id: str | None
+    ) -> WorkspaceSnapshot:
+        try:
+            workspace = progress.run_workspace(slug, run_id, user_id=user_id)
+        except KeyError as exc:
+            raise RunNotFound(run_id) from exc
+        except ValueError as exc:
+            raise RunSnapshotUnavailable(str(exc)) from exc
+        restored = challenges.restore_workspace(slug, workspace, user_id)
+        return WorkspaceSnapshot(revision=0, files=restored)
 
     def mark_spoiled(self, slug: str, user_id: str | None) -> dict[str, Any]:
         return progress.mark_spoiled(slug, user_id=user_id)
@@ -501,6 +524,12 @@ class PostgresLearnerStateAdapter:
         output_truncated = bool(values.get("output_truncated")) or len(output) > len(
             output_tail
         )
+        workspace = values.get("workspace")
+        workspace_json = (
+            None
+            if workspace is None
+            else json.dumps(dict(workspace), sort_keys=True)
+        )
         with self._pool.connection() as conn:
             self._begin_mutation(conn, user, slug)
             conn.execute(
@@ -514,8 +543,8 @@ class PostgresLearnerStateAdapter:
             row = conn.execute(
                 "INSERT INTO challenge_runs (user_id, slug, started_at, duration_ms, "
                 "session_elapsed_ms, green, passed, failed, errors, skipped, exit_code, "
-                "output_tail, output_truncated, tests) VALUES "
-                "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "output_tail, output_truncated, tests, workspace_snapshot) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) "
                 "RETURNING id",
                 (
                     user,
@@ -532,8 +561,15 @@ class PostgresLearnerStateAdapter:
                     output_tail,
                     output_truncated,
                     json.dumps(values.get("tests") or []),
+                    workspace_json,
                 ),
             ).fetchone()
+            conn.execute(
+                "DELETE FROM challenge_runs WHERE user_id = %s AND slug = %s "
+                "AND id NOT IN (SELECT id FROM challenge_runs WHERE user_id = %s "
+                "AND slug = %s ORDER BY id DESC LIMIT %s)",
+                (user, slug, user, slug, progress.RUN_HISTORY_LIMIT),
+            )
             self._record_product_event(
                 conn,
                 user,
@@ -567,12 +603,14 @@ class PostgresLearnerStateAdapter:
         self, slug: str, limit: int, user_id: str | None
     ) -> list[dict[str, Any]]:
         user = self._user(user_id)
-        bounded = max(1, min(int(limit), 200))
+        bounded = max(1, min(int(limit), progress.RUN_HISTORY_LIMIT))
         with self._pool.connection() as conn:
             rows = conn.execute(
                 "SELECT id, slug, started_at, duration_ms, session_elapsed_ms, green, "
                 "passed, failed, errors, skipped, exit_code, output_tail, "
-                "output_truncated, tests FROM challenge_runs "
+                "output_truncated, tests, "
+                "(workspace_snapshot IS NOT NULL) AS snapshot_available "
+                "FROM challenge_runs "
                 "WHERE user_id = %s AND slug = %s ORDER BY id DESC LIMIT %s",
                 (user, slug, bounded),
             ).fetchall()
@@ -584,6 +622,50 @@ class PostgresLearnerStateAdapter:
             }
             for row in rows
         ]
+
+    def restore_run(
+        self, slug: str, run_id: int, user_id: str | None
+    ) -> WorkspaceSnapshot:
+        user = self._user(user_id)
+        with self._pool.connection() as conn:
+            self._begin_mutation(conn, user, slug)
+            row = conn.execute(
+                "SELECT workspace_snapshot FROM challenge_runs "
+                "WHERE user_id = %s AND slug = %s AND id = %s",
+                (user, slug, run_id),
+            ).fetchone()
+            if row is None:
+                raise RunNotFound(run_id)
+            workspace = row["workspace_snapshot"]
+            if workspace is None:
+                raise RunSnapshotUnavailable(
+                    "run does not have a workspace snapshot"
+                )
+            if not isinstance(workspace, dict):
+                raise RunSnapshotUnavailable("run workspace snapshot is invalid")
+            try:
+                validated = challenges.validated_workspace_snapshot(slug, workspace)
+            except challenges.InvalidPath as exc:
+                raise RunSnapshotUnavailable(
+                    "run workspace snapshot is no longer compatible"
+                ) from exc
+            conn.execute(
+                "DELETE FROM workspace_files WHERE user_id = %s AND slug = %s",
+                (user, slug),
+            )
+            for path, content in validated.items():
+                conn.execute(
+                    "INSERT INTO workspace_files (user_id, slug, path, content) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (user, slug, path, content),
+                )
+            revision = conn.execute(
+                "UPDATE learner_challenges SET workspace_revision = workspace_revision + 1, "
+                "updated_at = now() WHERE user_id = %s AND slug = %s "
+                "RETURNING workspace_revision",
+                (user, slug),
+            ).fetchone()["workspace_revision"]
+        return WorkspaceSnapshot(revision=revision, files=validated)
 
     def mark_spoiled(self, slug: str, user_id: str | None) -> dict[str, Any]:
         user = self._user(user_id)

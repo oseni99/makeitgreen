@@ -301,14 +301,14 @@ code, debrief text, or the optional free-text comment.
 ## PostgreSQL model in Hosted Mode
 
 Migrations are versioned under [`backend/migrations/`](backend/migrations/).
-The application currently requires schema version 5.
+The application currently requires schema version 6.
 
 | Table | Responsibility |
 |---|---|
 | `greenline_schema_version` | Enforces the exact migration version expected by the code |
 | `learner_challenges` | One learner/challenge aggregate: progress, revision, spoil state, operation lease and fence |
 | `workspace_files` | Learner-created or edited file overlays, scoped by learner and challenge |
-| `challenge_runs` | Durable terminal run history and normalized results |
+| `challenge_runs` | Latest 10 terminal runs per learner/challenge, including normalized results and restorable workspace snapshots |
 | `run_jobs` | Queued/running/terminal execution state, output, claim token, fence, and expiry |
 | `request_rate_windows` | Cross-replica fixed-window request budgets |
 | `request_audit_events` | Durable admitted-request lifecycle without bodies or file paths |

@@ -82,7 +82,14 @@ def _assert_contract(
             feedback="",
         )
 
-    state.record_run(slug, user_a, green=False, failed=1, output="red")
+    first_run = state.record_run(
+        slug,
+        user_a,
+        green=False,
+        failed=1,
+        output="red",
+        workspace=dict(snapshot.files),
+    )
     state.record_run(slug, user_a, green=True, passed=1, output="green")
     saved_debrief = state.save_debrief(
         slug,
@@ -105,6 +112,24 @@ def _assert_contract(
         True,
         False,
     ]
+    state.write_file(slug, "src/answer.py", "answer = 'worse'\n", user_a)
+    state.delete_file(slug, "src/extra.py", user_a)
+    with pytest.raises(learner_state.RunNotFound):
+        state.restore_run(slug, first_run["id"], user_b)
+    restored = state.restore_run(slug, first_run["id"], user_a)
+    assert restored.files == snapshot.files
+    assert state.snapshot(slug, user_a).files == snapshot.files
+    for number in range(9):
+        state.record_run(
+            slug,
+            user_a,
+            green=False,
+            failed=1,
+            workspace={"src/answer.py": f"answer = {number}\n"},
+        )
+    retained = state.list_runs(slug, 200, user_a)
+    assert len(retained) == progress.RUN_HISTORY_LIMIT
+    assert first_run["id"] not in {run["id"] for run in retained}
     assert state.get_all(user_b) == {}
     event_names = [event["event_name"] for event in state.list_product_events(user_a)]
     assert event_names.count("catalog_visit") == 2
