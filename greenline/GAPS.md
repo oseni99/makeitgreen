@@ -1,6 +1,6 @@
 # MakeItGreen — Known Gaps & Improvement Backlog
 
-**Last reconciled with the codebase:** 2026-09-03
+**Last reconciled with the codebase:** 2026-09-08
 
 **Audience:** an agent (or engineer) picking up work on this codebase with no prior context.
 Read `README.md` first for architecture and how to run. This document is the honest,
@@ -30,27 +30,29 @@ green run → solved state → solution page). A jsdom React integration test no
 that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
 validate both ways (broken repo fails, solution overlay passes) via
 `scripts/validate_challenges.py`.
-The backend currently has 197 passing platform tests covering composition/readiness,
+The backend currently has 231 passing platform tests covering composition/readiness,
 authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
 challenge overlays, and API contracts. The current frontend passes `npm test`,
-`npm run lint`, and `npm run build`; its 24 tests comprise four dependency-free Node
-checks plus 20 Vitest checks covering configured authentication, the design system,
-the practice loop, and editor failure navigation. CI is
+`npm run lint`, and `npm run build`; its 34 tests comprise four dependency-free Node
+checks plus 30 Vitest checks covering configured authentication, the design system,
+the practice loop, editor failure navigation, and reliable checkpoint restoration. CI is
 `.github/workflows/greenline.yml`.
 
 ## Open work at a glance
 
 | Priority | Work | Why now |
 |---|---|---|
-| Beta validation | Observe path → run → solve → debrief → return conversion | First-party events and a 30-day operator report are now implemented |
+| Now | Production threat model | Deployable artifacts exist; this is the next unmet prerequisite for public hosting |
+| Next | Deployment operations | Network isolation, secret rotation, observability, audit export, and recovery drills remain |
+| Beta validation | Observe path → run → solve → debrief → return conversion | Begin once a safely operated beta can collect real usage |
 | Later | Retention practice and weekly publishing workflow | Evaluate after the beta learning loop has real usage |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
-| Now | Production identity, isolation, durable state, and deployment | Active hardening track; every gate is mandatory before public hosting |
 
-The active roadmap is local-first. Production gaps remain documented as hard hosting
-gates, not as the next implementation target.
+The local-first feature backlog is complete. The active engineering track is production
+readiness, but the service must not receive untrusted public traffic until every remaining
+hosting gate is implemented and exercised.
 
 ## Current backend safety baseline (do not regress)
 
@@ -107,15 +109,23 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 ### 3. ~~No run history / attempt analytics~~ — CLOSED
 
 - **Implemented:**
-  - `progress.py` `runs` table stores every run: wall-clock `duration_ms`, optional
-    `session_elapsed_ms` (workspace timer at click), counts, exit code, output tail,
-    and structured `tests_json`. Reset clears history with progress.
+  - `progress.py` retains the latest ten runs per learner and challenge: wall-clock
+    `duration_ms`, optional `session_elapsed_ms` (workspace timer at click), counts,
+    exit code, output tail, structured `tests_json`, and the validated workspace overlay
+    used by the run.
+    Existing SQLite history is pruned per challenge during schema initialization;
+    PostgreSQL migration 006 applies the same retention rule.
   - `POST /api/challenges/{slug}/run` accepts `{session_elapsed_ms}` and returns
     `run` + `duration_ms`. `GET /api/challenges/{slug}/runs` lists newest-first.
   - Workspace drawer has RESULTS | HISTORY tabs; selecting a history row reloads
-    that run's structured results. Attempts semantics decided: **every run counts**
-    (including post-solve reruns) — see gap 17 / backlog #26.
-  - Covered by `backend/tests/test_progress.py`.
+    that run's structured results. A retained snapshot can replace the current workspace
+    after confirmation; pending saves settle before restore, and save/run/restore actions
+    cannot race. Pre-snapshot history remains visible when retained but cannot be restored.
+    Attempts semantics decided: **every run counts** (including post-solve reruns) — see
+    gap 17 / backlog #26.
+  - Covered by `backend/tests/test_progress.py`, `backend/tests/test_api.py`,
+    `backend/tests/test_learner_state.py`, and
+    `frontend/tests/workspace-reliability.test.tsx`.
 
 ### 3a. ~~No guided, measurable beta learning loop~~ — CLOSED
 
@@ -206,7 +216,8 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   snapshots, spoil state, and reset. Local Mode keeps the filesystem/SQLite Adapter.
   The Hosted Mode Adapter stores the aggregate in PostgreSQL with `(user_id, slug)`
   keys, transactional run recording, atomic cascading reset, monotonic workspace
-  revisions, bounded output history, and an exact schema-version readiness check.
+  revisions, the latest ten restorable run checkpoints, bounded output history, and an
+  exact schema-version readiness check.
   Migrations are explicit deployment artifacts and never run under the application
   role. Container execution now requires an injected durable workspace snapshot, so
   it cannot discover or fall back to filesystem learner state.
@@ -367,7 +378,7 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 14. ~~Platform test coverage~~ — CLOSED
 
-- **Implemented:** 197 backend tests now also cover composition/readiness,
+- **Implemented:** 231 backend tests now also cover composition/readiness,
   authentication, tenant isolation, `progress.py` (attempts, sticky
   `solved_at`, non-downgrade, reset, concurrent SQLite, spoiled), `runner.py`
   (green/red/no-tests, stdout+stderr, truncation, container isolation policy), `challenges.py`
@@ -380,9 +391,9 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 - **Frontend practice loop:** `frontend/tests/practice-loop.test.tsx` renders the real
   React Router tree and drives catalog → workspace → failing run → edit/save → green
   run → solved state → solution. The HTTP boundary and Monaco widget are replaced with
-  deterministic test adapters; page orchestration, navigation, and state transitions
-  remain production code. `npm test` runs this Vitest/jsdom suite after four
-  dependency-free Node checks, so CI executes both layers.
+  deterministic test adapters; page orchestration, navigation, checkpoint restoration,
+  and state transitions remain production code. `npm test` runs this Vitest/jsdom suite
+  after four dependency-free Node checks, so CI executes both layers.
 - **PostgreSQL contracts:** Learner State, Run Jobs/capacity, and request
   admission/audit behavior run against migrated PostgreSQL when
   `GREENLINE_TEST_DATABASE_URL` is configured. These are skipped on machines without
@@ -458,10 +469,17 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 ## Suggested execution order
 
 The local-first backlog through this pass is complete: runtime overlay validation,
-streaming jobs, isolated challenge dependencies, Monaco failure navigation, the first
-three content batches and Node challenges, learning tracks/cadence, and the social-preview asset are
-implemented and tested. Hosted production work remains intentionally deferred; gaps 7
-and 15 describe the non-negotiable security and operations gates before deployment.
+streaming jobs, isolated challenge dependencies, Monaco failure navigation, restorable
+run checkpoints, the first three content batches and Node challenges, learning
+tracks/cadence, and the social-preview asset are implemented and tested.
+
+The next engineering deliverable is a production threat model covering the Control
+Plane, Execution Worker, Docker boundary, PostgreSQL, Clerk, Run Bundles, reverse proxy,
+and release pipeline. Use it to finalize direct-port isolation, secret rotation,
+collector-backed security alerts, durable audit export, backup/restore drills, registry
+retention, deployment-controller configuration, and permanent release-record export.
+Only after those controls are implemented and exercised should the hosted beta accept
+untrusted traffic and begin measuring the learning funnel.
 
 This table tracks the currently identified backlog, including minor items; it is a
 living inventory rather than a guarantee that no further work will be discovered.
@@ -475,7 +493,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 2 | `.gitignore` for runtime state (gap 16) | S | Hygiene | ✅ done |
 | 3 | Monaco DiffEditor on solution page (gap 11) | S | Medium | ✅ done |
 | 4 | Structured test results + per-test UI (gap 2) | M | High | ✅ done |
-| 5 | Run history incl. elapsed time (gaps 3, 1 leftover) | S–M | Medium | ✅ done |
+| 5 | Run history, elapsed time, and checkpoints (gaps 3, 1 leftover) | S–M | Medium | ✅ done |
 | 6 | New-file support (gap 5) | M | Unblocks new content type | ✅ done |
 | 7 | Incident Debugging challenge (gap 9) | M | High for the owner | ✅ done (`incident-alerts`) |
 | 7b | Database Engineering challenge (gap 9) | M | High for the owner | ✅ done (`booking-db`) |
@@ -485,7 +503,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 9 | Platform tests + content validation CI foundation (gap 14) | S–M | Compounding | ✅ done |
 | 10 | Streaming runs + per-challenge venvs (gaps 8, 6) | L | Medium | ✅ done |
 | 11 | AI interviewer (gap 4) | L | Parked — owner said skip for now | ⏸ deferred |
-| 12 | Production architecture + threat model (gaps 7, 15) | L | Blocks hosting | ⏸ later; required before hosting |
+| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks hosting | ▶ next |
 | 13 | Multiple editor tabs (gap 12) | S–M | Medium | ✅ done |
 | 14 | Cmd+S save + "saved" indicator (gap 12) | S | Medium | ✅ done |
 | 15 | Unsaved-changes guard on navigation (gap 12) | S | Medium | ✅ done |
