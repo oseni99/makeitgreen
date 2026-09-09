@@ -11,7 +11,7 @@ export interface ChallengeVariant {
   progress: Progress
 }
 
-export interface ChallengeMeta {
+export interface ChallengeSummary {
   slug: string
   concept_slug?: string
   variant?: string
@@ -22,8 +22,11 @@ export interface ChallengeMeta {
   minutes: number
   language: string
   blurb: string
-  brief: string
   progress: Progress
+}
+
+export interface ChallengeMeta extends ChallengeSummary {
+  brief: string
   creatable?: string[]
 }
 
@@ -194,7 +197,7 @@ export const api = {
     }),
   recordVisit: () => req<{ ok: true }>('/api/me/visits', { method: 'POST' }),
   listChallenges: (opts?: FetchOpts) =>
-    req<{ challenges: ChallengeMeta[] }>('/api/challenges', { signal: opts?.signal }).then(
+    req<{ challenges: ChallengeSummary[] }>('/api/challenges', { signal: opts?.signal }).then(
       (d) => d.challenges,
     ),
   getChallenge: (slug: string, opts?: FetchOpts) =>

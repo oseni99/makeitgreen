@@ -30,7 +30,7 @@ green run → solved state → solution page). A jsdom React integration test no
 that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
 validate both ways (broken repo fails, solution overlay passes) via
 `scripts/validate_challenges.py`.
-The backend currently has 231 passing platform tests covering composition/readiness,
+The backend currently has 233 passing platform tests covering composition/readiness,
 authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
@@ -71,6 +71,9 @@ These used to be gaps and are now implemented and regression-tested:
   briefly, then escalates to KILL so spawned descendants do not survive the run.
 - Invalid `challenge.json` content and non-UTF-8 challenge files return deterministic
   JSON errors rather than an opaque plain-text 500.
+- Hosted Mode requires the signed Clerk `beta_access` claim, returns only summary
+  metadata from the catalog, gates solutions on solved/spoiled state, and temporarily
+  blocks bulk cross-challenge or solution extraction with PostgreSQL-backed counters.
 
 Relevant regression suites live under `backend/tests/`. These protections make the
 local workflow safer; they are not a substitute for production isolation (gap 7).
@@ -232,7 +235,10 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 - **Abuse controls implemented:** `abuse_controls.py` rejects declared or streamed
   request bodies over the configured byte limit before parsing. Authenticated Hosted
   Mode requests use PostgreSQL-backed fixed-window per-learner budgets, with stricter
-  mutation and Challenge Run budgets. Request admission durably creates a bounded,
+  mutation, Challenge Run, and Challenge Content budgets. Hourly counters detect access
+  across unusually many distinct challenges or solutions and temporarily block it;
+  blocked bulk extraction emits a bounded security event without recording file paths.
+  Request admission durably creates a bounded,
   tenant-scoped audit event before route mutation; repeated rate-limit rejections are
   aggregated per learner/scope/window to prevent audit amplification, and unavailable admission fails closed.
   Run Job enqueue uses a PostgreSQL transaction advisory lock to enforce global and
@@ -249,10 +255,14 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   tests/config are read-only. Host isolation protects infrastructure; trustworthy
   scoring may additionally require a trusted supervisor and a protocol that does not
   accept the candidate process's exit status as the sole source of truth.
-- **Current API/state:** Clerk bearer-token verification is now available and enforced
-  whenever `CLERK_SECRET_KEY` is configured; the frontend exposes Google-only sign-in
-  when `VITE_CLERK_PUBLISHABLE_KEY` is configured. Authenticated workspaces, progress,
-  and run history are isolated by Clerk's verified `sub`. CORS is a
+- **Current API/state:** Clerk bearer-token verification is enforced whenever
+  `CLERK_SECRET_KEY` is configured; Hosted Mode additionally requires the verified
+  `beta_access: true` session claim, and deployment guidance requires Clerk Invite-only
+  mode. The frontend exposes Google-only sign-in when `VITE_CLERK_PUBLISHABLE_KEY` is
+  configured. Authenticated workspaces, progress, and run history are isolated by
+  Clerk's verified `sub`. The catalog exposes only browsing summaries; full briefs and
+  repository content remain per-challenge reads, and reference solutions require that
+  learner's solved or spoiled state. CORS is a
   browser policy, not an access-control boundary;
   non-browser clients can call the code-execution endpoint directly when auth is not
   configured in Local Mode. `challenge_locks.py` remains the Local Mode mechanism;
@@ -335,8 +345,8 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 ### 10. ~~Solutions are ungated spoilers~~ — CLOSED
 
 - **Implemented:** `progress.spoiled` column (migrated on existing DBs) plus
-  `POST /api/challenges/{slug}/spoil`. GET `/solution` stays ungated; the client
-  records spoiled after confirm.
+  `POST /api/challenges/{slug}/spoil`. The client records spoiled after confirm,
+  and the backend refuses `GET /solution` unless that learner is solved or spoiled.
   - Workspace Solution links: unsaved confirm, then spoil confirm unless already
     solved or spoiled. Fail to record → stay put.
   - Direct `/c/:slug/solution` shows a Confirm / Back panel when not solved/spoiled.
@@ -378,7 +388,7 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 14. ~~Platform test coverage~~ — CLOSED
 
-- **Implemented:** 231 backend tests now also cover composition/readiness,
+- **Implemented:** 233 backend tests now also cover composition/readiness,
   authentication, tenant isolation, `progress.py` (attempts, sticky
   `solved_at`, non-downgrade, reset, concurrent SQLite, spoiled), `runner.py`
   (green/red/no-tests, stdout+stderr, truncation, container isolation policy), `challenges.py`

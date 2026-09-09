@@ -301,7 +301,7 @@ code, debrief text, or the optional free-text comment.
 ## PostgreSQL model in Hosted Mode
 
 Migrations are versioned under [`backend/migrations/`](backend/migrations/).
-The application currently requires schema version 6.
+The application currently requires schema version 7.
 
 | Table | Responsibility |
 |---|---|
@@ -311,6 +311,7 @@ The application currently requires schema version 6.
 | `challenge_runs` | Latest 10 terminal runs per learner/challenge, including normalized results and restorable workspace snapshots |
 | `run_jobs` | Queued/running/terminal execution state, output, claim token, fence, and expiry |
 | `request_rate_windows` | Cross-replica fixed-window request budgets |
+| `challenge_content_windows` | Hourly per-learner content-access counts for bulk-extraction detection |
 | `request_audit_events` | Durable admitted-request lifecycle without bodies or file paths |
 | `worker_releases` | Fresh worker readiness, source revision, and exact execution-image references |
 | `learner_preferences` | Account-level Prep Path |
@@ -346,13 +347,13 @@ execution or tenant mixing.
 | Area | Routes | Purpose |
 |---|---|---|
 | Profile | `GET/PUT /api/me/preferences`, `GET /api/me/activity`, `POST /api/me/visits` | Prep Path, daily solve activity, and learning-loop visits |
-| Catalog | `GET /api/challenges` | Challenge metadata joined with learner progress |
+| Catalog | `GET /api/challenges` | Non-sensitive challenge summaries joined with learner progress |
 | Workspace | `GET /api/challenges/{slug}` and `/files/{path}` | Metadata, tree, and effective file content |
 | Editing | `PUT/POST/DELETE .../files/{path}` | Save, create, or remove overlays under challenge policy |
 | Tools | `GET .../search`, `POST .../reset` | Search the effective workspace or reset learner state |
 | Runs | `POST .../run`, `POST .../runs`, `GET .../runs` | Local synchronous compatibility, async start, and history |
 | Job output | `GET /api/run-jobs/{job_id}` | Poll bounded incremental output and terminal result |
-| Solution | `POST .../spoil`, `GET .../solution` | Record reveal and read reference content |
+| Solution | `POST .../spoil`, `GET .../solution` | Record reveal and read reference content only after solved/spoiled authorization |
 | Debrief | `GET/PUT .../debrief` | Read or save the post-solve reflection |
 | Operations | `/health/live`, `/health/ready`, `/health/release` | Process, dependency, and exact-version rollout health |
 

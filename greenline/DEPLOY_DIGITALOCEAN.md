@@ -136,11 +136,13 @@ come from the same release manifest.
    configuration.
 2. Keep Google as the configured sign-in provider, matching
    [`AUTH.md`](AUTH.md).
-3. Add the final application origin, for example
+3. Set Clerk access mode to **Invite-only**, add the `beta_access` session
+   claim from `public_metadata.beta_access`, and grant it only to approved testers.
+4. Add the final application origin, for example
    `https://beta.example.com`, to the Clerk configuration.
-4. Keep the Clerk secret key for the server. Never put it in the frontend or
+5. Keep the Clerk secret key for the server. Never put it in the frontend or
    commit it.
-5. Confirm the publishable key configured in GitHub belongs to this same Clerk
+6. Confirm the publishable key configured in GitHub belongs to this same Clerk
    application. It is compiled into the frontend image at build time.
 
 Changing the publishable key requires a new image release; changing the secret
@@ -293,6 +295,9 @@ GREENLINE_LOG_HMAC_KEY_FILE=/run/secrets/security_log_hmac_key
 GREENLINE_TRUSTED_PROXY_CIDRS=172.30.0.0/24
 GREENLINE_MAX_ACTIVE_RUNS=1
 GREENLINE_MAX_ACTIVE_RUNS_PER_USER=1
+GREENLINE_CONTENT_READS_PER_MINUTE=120
+GREENLINE_DISTINCT_CHALLENGES_PER_HOUR=20
+GREENLINE_SOLUTIONS_PER_HOUR=5
 ```
 
 The worker needs:
@@ -387,7 +392,8 @@ Test a restore into a disposable database before inviting users. Alert on:
 
 ### Phase 14: open the invited beta
 
-1. Start with a short allowlist of testers in Clerk.
+1. Keep Clerk in Invite-only mode and grant `beta_access: true` only to the
+   short list of approved testers.
 2. Keep worker concurrency at one.
 3. Set a DigitalOcean billing alert.
 4. Observe queue time, execution duration, container failures, memory, and

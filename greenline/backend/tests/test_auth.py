@@ -1,8 +1,12 @@
+import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 import app as api
 import challenges
@@ -92,6 +96,55 @@ def test_verified_clerk_request_reaches_api(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "challenges" in response.json()
+
+
+def test_hosted_api_requires_signed_beta_access_claim(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        mode=api.RuntimeMode.HOSTED,
+        clerk_secret="sk_test_example",
+        authorized_parties=("https://app.example.com",),
+        security_events=SimpleNamespace(emit=lambda *_args, **_kwargs: None),
+    )
+
+    def request() -> Request:
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/challenges",
+                "query_string": b"",
+                "headers": [],
+                "scheme": "https",
+                "server": ("app.example.com", 443),
+                "client": ("127.0.0.1", 1234),
+                "app": SimpleNamespace(state=SimpleNamespace(runtime_settings=settings)),
+            }
+        )
+
+    reached = False
+
+    async def call_next(_request: Request) -> JSONResponse:
+        nonlocal reached
+        reached = True
+        return JSONResponse({"ok": True})
+
+    monkeypatch.setattr(
+        api.auth,
+        "authenticate",
+        lambda _request, **_kwargs: {"sub": "user_123"},
+    )
+    denied = asyncio.run(api.clerk_authentication(request(), call_next))
+    assert denied.status_code == 403
+    assert reached is False
+
+    monkeypatch.setattr(
+        api.auth,
+        "authenticate",
+        lambda _request, **_kwargs: {"sub": "user_123", "beta_access": True},
+    )
+    allowed = asyncio.run(api.clerk_authentication(request(), call_next))
+    assert allowed.status_code == 200
+    assert reached is True
 
 
 def test_authenticated_progress_isolated_by_clerk_subject(tmp_path, monkeypatch) -> None:

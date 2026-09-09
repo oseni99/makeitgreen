@@ -77,6 +77,29 @@ def test_catalog_lists_challenges_with_progress(isolated_api: Path) -> None:
     assert items[1]["progress"]["status"] == "todo"
 
 
+def test_catalog_exposes_summaries_without_challenge_content(
+    isolated_api: Path,
+) -> None:
+    _create_challenge(
+        isolated_api,
+        "demo",
+        meta={
+            "brief": "Confidential interview prompt",
+            "runtime": {"command": ["python", "-m", "pytest"]},
+            "readonly": ["tests/"],
+            "creatable": ["src/"],
+        },
+    )
+
+    item = TestClient(api.app).get("/api/challenges").json()["challenges"][0]
+
+    assert item["slug"] == "demo"
+    assert "brief" not in item
+    assert "runtime" not in item
+    assert "readonly" not in item
+    assert "creatable" not in item
+
+
 def test_catalog_groups_language_variants_and_detail_selects_one(
     isolated_api: Path,
 ) -> None:
@@ -222,6 +245,11 @@ def test_solution_success_and_unknown_404(isolated_api: Path) -> None:
     )
     client = TestClient(api.app)
 
+    locked = client.get("/api/challenges/demo/solution")
+    assert locked.status_code == 403
+    assert locked.json() == {"detail": "solution is locked"}
+
+    assert client.post("/api/challenges/demo/spoil").status_code == 200
     ok = client.get("/api/challenges/demo/solution")
     assert ok.status_code == 200
     body = ok.json()

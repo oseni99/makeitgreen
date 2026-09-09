@@ -28,6 +28,21 @@ def test_request_classification_uses_bounded_non_sensitive_actions() -> None:
         ).run
         is False
     )
+    content = abuse_controls.classify_request(
+        "GET", "/api/challenges/demo/files/src/app.py"
+    )
+    assert content.content is True
+    assert content.solution is False
+    assert content.action == "challenge.content.read"
+    solution = abuse_controls.classify_request(
+        "GET", "/api/challenges/demo/solution"
+    )
+    assert solution.content is True
+    assert solution.solution is True
+    assert solution.action == "challenge.solution.read"
+    assert abuse_controls.classify_request(
+        "GET", "/api/challenges/demo/runs"
+    ).content is False
 
 
 def test_request_body_limit_rejects_declared_oversize_before_handler() -> None:
@@ -86,7 +101,7 @@ def test_abuse_control_policy_rejects_incoherent_run_capacity() -> None:
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-6 PostgreSQL integration database",
+    reason="requires a schema-version-7 PostgreSQL integration database",
 )
 def test_postgres_rate_limit_and_audit_lifecycle_are_durable() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]
@@ -128,5 +143,53 @@ def test_postgres_rate_limit_and_audit_lifecycle_are_durable() -> None:
         ]
         assert rows[1]["action"] == "challenge.file.mutate"
         assert rows[1]["response_status"] == 200
+    finally:
+        adapter.close()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
+    reason="requires a schema-version-7 PostgreSQL integration database",
+)
+def test_postgres_blocks_bulk_cross_challenge_and_solution_reads() -> None:
+    dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]
+    policy = abuse_controls.AbuseControlPolicy(
+        requests_per_minute=20,
+        mutations_per_minute=10,
+        runs_per_minute=5,
+        content_reads_per_minute=10,
+        distinct_challenges_per_hour=2,
+        solutions_per_hour=1,
+    )
+    adapter = abuse_controls.PostgresAbuseControlAdapter.connect(dsn, policy)
+    distinct_user = f"content-distinct-{uuid4().hex}"
+    solution_user = f"content-solution-{uuid4().hex}"
+    try:
+        adapter.begin_request(
+            distinct_user, "GET", "/api/challenges/alpha", "request-1"
+        )
+        adapter.begin_request(
+            distinct_user, "GET", "/api/challenges/beta/files/main.py", "request-2"
+        )
+        with pytest.raises(abuse_controls.ContentScrapeDetected) as distinct:
+            adapter.begin_request(
+                distinct_user, "GET", "/api/challenges/gamma", "request-3"
+            )
+        assert distinct.value.retry_after == 3600
+
+        adapter.begin_request(
+            solution_user, "GET", "/api/challenges/alpha/solution", "request-4"
+        )
+        with pytest.raises(abuse_controls.ContentScrapeDetected):
+            adapter.begin_request(
+                solution_user, "GET", "/api/challenges/beta/solution", "request-5"
+            )
+
+        assert adapter.list_audit_events(distinct_user)[0]["action"] == (
+            "challenge.content.read"
+        )
+        assert adapter.list_audit_events(solution_user)[0]["action"] == (
+            "challenge.solution.read"
+        )
     finally:
         adapter.close()

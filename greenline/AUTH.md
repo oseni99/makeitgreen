@@ -7,7 +7,24 @@ MakeItGreen uses Clerk for identity and Google as its only sign-in method.
 1. Create or select the Clerk application.
 2. Enable the Google social connection.
 3. Disable email/password, magic-link, phone, and other social connections.
-4. Add `http://localhost:5173` as a development origin and redirect URL.
+4. Set production beta access mode to **Invite-only**. Sending invitations by
+   itself is insufficient; Open access still permits uninvited sign-ups.
+5. Add a boolean `beta_access` custom claim to the session token, sourced from
+   approved users' public metadata. Hosted Mode rejects the complete API unless
+   this signed claim is exactly `true`.
+6. Add `http://localhost:5173` as a development origin and redirect URL.
+
+Configure the session token claim in Clerk as:
+
+```json
+{
+  "beta_access": "{{user.public_metadata.beta_access}}"
+}
+```
+
+For each invited tester, set `public_metadata.beta_access` to `true` through
+an administrator-controlled Clerk workflow. Do not grant this metadata from
+the browser.
 
 The UI intentionally exposes one entry point: **Sign in with Google**. The
 provider allowlist is enforced by the Clerk application configuration rather
@@ -70,3 +87,10 @@ polling are keyed by Clerk's verified `sub` claim. The local SQLite/workspace
 paths use a SHA-256 namespace derived from that subject, so the subject itself
 is never used as a filesystem path. Requests without configured Clerk keys keep
 the legacy single-user local paths for offline development and tests.
+
+Hosted challenge metadata is split by exposure level. The catalog returns only
+the summary needed to browse; full briefs, repository files, search results,
+and solutions are tracked as Challenge Content reads. Bulk access across many
+challenges or solutions is temporarily blocked and emitted as a structured
+security event. Solution content is returned only after that learner has solved
+or explicitly spoiled the challenge.

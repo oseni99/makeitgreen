@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   api,
   isAbortError,
-  type ChallengeMeta,
+  type ChallengeSummary,
   type ChallengeVariant,
   type PrepPath,
 } from '../api'
@@ -25,13 +25,13 @@ function storedFocus(): FocusId | '' {
   }
 }
 
-function statusLabel(status: ChallengeMeta['progress']['status']) {
+function statusLabel(status: ChallengeSummary['progress']['status']) {
   if (status === 'solved') return '● SOLVED'
   if (status === 'attempted') return '◐ ATTEMPTED'
   return '○ TODO'
 }
 
-function variantsFor(challenge: ChallengeMeta): ChallengeVariant[] {
+function variantsFor(challenge: ChallengeSummary): ChallengeVariant[] {
   return challenge.variants ?? [
     {
       id: challenge.variant ?? 'default',
@@ -42,7 +42,7 @@ function variantsFor(challenge: ChallengeMeta): ChallengeVariant[] {
   ]
 }
 
-function preferredVariant(challenge: ChallengeMeta): ChallengeVariant {
+function preferredVariant(challenge: ChallengeSummary): ChallengeVariant {
   const variants = variantsFor(challenge)
   return (
     variants.find((variant) => variant.progress.status === 'attempted') ??
@@ -52,7 +52,7 @@ function preferredVariant(challenge: ChallengeMeta): ChallengeVariant {
 }
 
 export default function Catalog() {
-  const [challenges, setChallenges] = useState<ChallengeMeta[] | null>(null)
+  const [challenges, setChallenges] = useState<ChallengeSummary[] | null>(null)
   const [error, setError] = useState(false)
   const [filter, setFilter] = useState('All')
   const [focus, setFocus] = useState<FocusId | ''>(storedFocus)

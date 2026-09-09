@@ -84,6 +84,7 @@ def test_search_non_utf8_repo_file_returns_deterministic_json_error(
 
 def test_non_utf8_solution_file_returns_deterministic_json_error(
     isolated_challenges: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     challenge = _create_challenge(isolated_challenges, "invalid-solution-file")
     (challenge / "repo" / "main.py").write_text("broken\n", encoding="utf-8")
@@ -92,7 +93,22 @@ def test_non_utf8_solution_file_returns_deterministic_json_error(
     (solution_dir / "SOLUTION.md").write_text("Fix it.\n", encoding="utf-8")
     (solution_dir / "main.py").write_bytes(b"fixed\n\xff")
 
-    response = TestClient(api.app, raise_server_exceptions=False).get(
+    client = TestClient(api.app, raise_server_exceptions=False)
+    assert client.post(
+        "/api/challenges/invalid-solution-file/spoil"
+    ).status_code == 200
+    monkeypatch.setattr(
+        api.app.state.learner_state_adapter,
+        "get_all",
+        lambda user_id: {
+            "invalid-solution-file": {
+                "status": "todo",
+                "attempts": 0,
+                "spoiled": True,
+            }
+        },
+    )
+    response = client.get(
         "/api/challenges/invalid-solution-file/solution"
     )
 

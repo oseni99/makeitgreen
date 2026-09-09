@@ -19,6 +19,8 @@ psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/005_beta_learning_loop.sql
 psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
   --file backend/migrations/006_run_checkpoints.sql
+psql "$GREENLINE_DATABASE_URL" --set ON_ERROR_STOP=1 \
+  --file backend/migrations/007_content_access_controls.sql
 ```
 
 `PostgresLearnerStateAdapter.check_ready()` verifies the exact schema version
@@ -44,3 +46,7 @@ feedback, plus bounded first-party product events for the beta learning loop.
 Migration 006 stores the exact workspace overlay used by each run, trims each
 learner's per-challenge history to the latest 10 checkpoints, and enables safe
 workspace restoration from those checkpoints.
+
+Migration 007 adds durable hourly Challenge Content access windows and a
+content-specific request scope. Hosted replicas use these rows to block bulk
+cross-challenge and solution extraction without storing learner file paths.

@@ -5,7 +5,7 @@ import { Link, Navigate } from 'react-router-dom'
 import {
   api,
   isAbortError,
-  type ChallengeMeta,
+  type ChallengeSummary,
   type LearnerPreferences,
   type SolveActivity,
 } from '../api'
@@ -14,7 +14,7 @@ import { PREP_PATH_NAMES, PREP_TRACKS } from '../prepPaths'
 import { buttonVariants } from '@/components/ui/button-variants'
 import { Button } from '@/components/ui/button'
 
-function continueSlug(challenge: ChallengeMeta): string {
+function continueSlug(challenge: ChallengeSummary): string {
   const variants = challenge.variants ?? []
   return (
     variants.find((variant) => variant.progress.status === 'attempted')?.slug ??
@@ -59,7 +59,7 @@ function activityDays(activity: SolveActivity[], today = new Date()) {
 function ConfiguredProfile() {
   const { isLoaded, isSignedIn, user } = useUser()
   const { signOut } = useClerk()
-  const [challenges, setChallenges] = useState<ChallengeMeta[] | null>(null)
+  const [challenges, setChallenges] = useState<ChallengeSummary[] | null>(null)
   const [preferences, setPreferences] = useState<LearnerPreferences | null>(null)
   const [activity, setActivity] = useState<SolveActivity[] | null>(null)
   const [error, setError] = useState(false)

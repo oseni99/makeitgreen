@@ -19,6 +19,21 @@ class RateLimitExceeded(RuntimeError):
 
     retry_after = 60
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after: int = 60,
+        scope: str = "all",
+    ) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.scope = scope
+
+
+class ContentScrapeDetected(RateLimitExceeded):
+    """A learner crossed a bounded bulk-content access threshold."""
+
 
 class RequestBodyTooLarge(ValueError):
     """A request body exceeded the configured byte limit."""
@@ -30,6 +45,9 @@ class AbuseControlPolicy:
     requests_per_minute: int = 240
     mutations_per_minute: int = 30
     runs_per_minute: int = 6
+    content_reads_per_minute: int = 120
+    distinct_challenges_per_hour: int = 20
+    solutions_per_hour: int = 5
     max_active_runs: int = 20
     max_active_runs_per_user: int = 2
     audit_retention_days: int = 30
@@ -59,6 +77,9 @@ def policy_from_environment(source: Mapping[str, str]) -> AbuseControlPolicy:
         "requests_per_minute": "GREENLINE_REQUESTS_PER_MINUTE",
         "mutations_per_minute": "GREENLINE_MUTATIONS_PER_MINUTE",
         "runs_per_minute": "GREENLINE_RUNS_PER_MINUTE",
+        "content_reads_per_minute": "GREENLINE_CONTENT_READS_PER_MINUTE",
+        "distinct_challenges_per_hour": "GREENLINE_DISTINCT_CHALLENGES_PER_HOUR",
+        "solutions_per_hour": "GREENLINE_SOLUTIONS_PER_HOUR",
         "max_active_runs": "GREENLINE_MAX_ACTIVE_RUNS",
         "max_active_runs_per_user": "GREENLINE_MAX_ACTIVE_RUNS_PER_USER",
         "audit_retention_days": "GREENLINE_AUDIT_RETENTION_DAYS",
@@ -77,6 +98,8 @@ class RequestClassification:
     slug: str | None
     mutation: bool
     run: bool
+    content: bool
+    solution: bool
 
 
 @dataclass(frozen=True)
@@ -116,6 +139,20 @@ def classify_request(method: str, path: str) -> RequestClassification:
         and len(parts) == 4
         and parts[3] in {"run", "runs"}
     )
+    solution = bool(
+        normalized_method == "GET"
+        and slug
+        and len(parts) == 4
+        and parts[3] == "solution"
+    )
+    content = bool(
+        normalized_method == "GET"
+        and slug
+        and (
+            len(parts) == 3
+            or (len(parts) >= 4 and parts[3] in {"files", "search", "solution"})
+        )
+    )
     if run:
         action = "challenge.run"
     elif slug and "files" in parts and mutation:
@@ -124,11 +161,15 @@ def classify_request(method: str, path: str) -> RequestClassification:
         action = "challenge.reset"
     elif slug and parts[-1:] == ["spoil"]:
         action = "challenge.spoil"
+    elif solution:
+        action = "challenge.solution.read"
+    elif content:
+        action = "challenge.content.read"
     elif mutation:
         action = "api.mutate"
     else:
         action = "api.read"
-    return RequestClassification(action, slug, mutation, run)
+    return RequestClassification(action, slug, mutation, run, content, solution)
 
 
 class LocalAbuseControlAdapter:
@@ -238,6 +279,37 @@ class PostgresAbuseControlAdapter:
         ).fetchone()
         return row is not None and row["rejected_count"] == 1
 
+    @staticmethod
+    def _record_content_access(
+        conn: Any,
+        user_id: str,
+        slug: str,
+        *,
+        solution: bool,
+    ) -> dict[str, int]:
+        conn.execute(
+            "INSERT INTO challenge_content_windows "
+            "(user_id, slug, window_started_at, request_count, solution_count) "
+            "VALUES (%s, %s, date_trunc('hour', now()), 1, %s) "
+            "ON CONFLICT (user_id, slug, window_started_at) DO UPDATE SET "
+            "request_count = challenge_content_windows.request_count + 1, "
+            "solution_count = challenge_content_windows.solution_count + EXCLUDED.solution_count",
+            (user_id, slug, 1 if solution else 0),
+        )
+        row = conn.execute(
+            "SELECT count(*) AS distinct_challenges, "
+            "coalesce(sum(request_count), 0) AS content_reads, "
+            "coalesce(sum(solution_count), 0) AS solutions "
+            "FROM challenge_content_windows WHERE user_id = %s "
+            "AND window_started_at = date_trunc('hour', now())",
+            (user_id,),
+        ).fetchone()
+        return {
+            "distinct_challenges": int(row["distinct_challenges"]),
+            "content_reads": int(row["content_reads"]),
+            "solutions": int(row["solutions"]),
+        }
+
     def begin_request(
         self,
         user_id: str,
@@ -251,12 +323,15 @@ class PostgresAbuseControlAdapter:
             scopes.append(("mutation", self.policy.mutations_per_minute))
         if classification.run:
             scopes.append(("run", self.policy.runs_per_minute))
+        if classification.content:
+            scopes.append(("content", self.policy.content_reads_per_minute))
 
         audit_id = uuid4()
         limited = False
         limited_scope: str | None = None
         effective_limit = self.policy.requests_per_minute
         effective_remaining = effective_limit
+        retry_after = 60
         with self._connection() as conn:
             for scope, limit in scopes:
                 count = self._consume(conn, user_id, scope, limit)
@@ -269,10 +344,34 @@ class PostgresAbuseControlAdapter:
                 if limit <= effective_limit:
                     effective_limit = limit
                     effective_remaining = max(0, limit - count)
+            if not limited and classification.content and classification.slug:
+                content = self._record_content_access(
+                    conn,
+                    user_id,
+                    classification.slug,
+                    solution=classification.solution,
+                )
+                if (
+                    content["distinct_challenges"]
+                    > self.policy.distinct_challenges_per_hour
+                ):
+                    limited = True
+                    limited_scope = "content_distinct_hour"
+                    effective_limit = self.policy.distinct_challenges_per_hour
+                    retry_after = 3600
+                elif content["solutions"] > self.policy.solutions_per_hour:
+                    limited = True
+                    limited_scope = "content_solution_hour"
+                    effective_limit = self.policy.solutions_per_hour
+                    retry_after = 3600
             should_audit = (
                 classification.mutation
                 if not limited
-                else self._record_rejection(conn, user_id, limited_scope or "all")
+                else (
+                    True
+                    if (limited_scope or "").startswith("content_")
+                    else self._record_rejection(conn, user_id, limited_scope or "all")
+                )
             )
             if should_audit:
                 conn.execute(
@@ -296,13 +395,29 @@ class PostgresAbuseControlAdapter:
                 "ORDER BY window_started_at LIMIT 100)"
             )
             conn.execute(
+                "DELETE FROM challenge_content_windows WHERE (user_id, slug, window_started_at) "
+                "IN (SELECT user_id, slug, window_started_at FROM challenge_content_windows "
+                "WHERE window_started_at < date_trunc('hour', now()) - interval '1 day' "
+                "ORDER BY window_started_at LIMIT 100)"
+            )
+            conn.execute(
                 "DELETE FROM request_audit_events WHERE id IN "
                 "(SELECT id FROM request_audit_events WHERE created_at < now() - "
                 "(%s * interval '1 day') ORDER BY created_at LIMIT 100)",
                 (self.policy.audit_retention_days,),
             )
         if limited:
-            raise RateLimitExceeded("request rate limit exceeded")
+            if (limited_scope or "").startswith("content"):
+                raise ContentScrapeDetected(
+                    "bulk challenge content access detected",
+                    retry_after=retry_after,
+                    scope=limited_scope or "content",
+                )
+            raise RateLimitExceeded(
+                "request rate limit exceeded",
+                retry_after=retry_after,
+                scope=limited_scope or "all",
+            )
         return RequestAdmission(
             audit_id if should_audit else None,
             effective_limit,

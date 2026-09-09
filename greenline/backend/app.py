@@ -525,6 +525,20 @@ async def clerk_authentication(request: Request, call_next):
             payload = None
         if payload is None:
             return JSONResponse(status_code=401, content={"detail": "authentication required"})
+        if (
+            settings.mode is RuntimeMode.HOSTED
+            and payload.get("beta_access") is not True
+        ):
+            subject = payload.get("sub")
+            settings.security_events.emit(
+                "auth.beta_access_denied",
+                user_id=subject if isinstance(subject, str) else None,
+                severity="warning",
+            )
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "beta access required"},
+            )
         request.state.clerk_payload = payload
     return await call_next(request)
 
@@ -552,12 +566,13 @@ async def enforce_abuse_controls(request: Request, call_next):
             request_id,
         )
     except abuse_controls.RateLimitExceeded as exc:
+        bulk_content = isinstance(exc, abuse_controls.ContentScrapeDetected)
         settings.security_events.emit(
-            "request.rate_limited",
+            "content.bulk_access_blocked" if bulk_content else "request.rate_limited",
             request_id=request_id,
             user_id=user_id,
             severity="warning",
-            fields={"action": classification.action},
+            fields={"action": classification.action, "scope": exc.scope},
         )
         return JSONResponse(
             status_code=429,
@@ -839,6 +854,23 @@ def _with_variant_progress(meta: dict, progress: dict[str, dict]) -> dict:
     return {**meta, "variants": variants, "progress": selected}
 
 
+def _catalog_summary(item: dict) -> dict:
+    public_fields = (
+        "slug",
+        "concept_slug",
+        "variant",
+        "variants",
+        "title",
+        "type",
+        "difficulty",
+        "minutes",
+        "language",
+        "blurb",
+        "progress",
+    )
+    return {field: item[field] for field in public_fields if field in item}
+
+
 @router.get("/api/challenges")
 def list_challenges(request: Request) -> dict:
     prog = request_learner_state(request).get_all(request_user_id(request))
@@ -846,7 +878,7 @@ def list_challenges(request: Request) -> dict:
     for meta in ch.load_all():
         item = _with_variant_progress(meta, prog)
         item["progress"] = _catalog_progress(item["variants"])
-        items.append(item)
+        items.append(_catalog_summary(item))
     return {"challenges": items}
 
 
@@ -1113,8 +1145,17 @@ def spoil(slug: str, request: Request = None) -> dict:  # type: ignore[assignmen
 
 
 @router.get("/api/challenges/{slug}/solution")
-def solution(slug: str) -> dict:
+def solution(slug: str, request: Request) -> dict:
     try:
+        ch.load(slug)
+        learner_progress = request_learner_state(request).get_all(
+            request_user_id(request)
+        ).get(slug, _empty_progress())
+        if (
+            learner_progress["status"] != "solved"
+            and not learner_progress.get("spoiled", False)
+        ):
+            raise HTTPException(403, "solution is locked")
         return ch.solution_files(slug)
     except ch.ChallengeNotFound:
         raise HTTPException(404, "solution not found")

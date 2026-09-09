@@ -12,7 +12,7 @@ import challenges
 import progress
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 PREP_PATHS = frozenset({"foundations", "distributed", "debugging", "senior"})
 
 

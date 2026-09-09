@@ -175,7 +175,7 @@ def test_release_status_rejects_mixed_or_inconsistent_live_workers() -> None:
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-6 PostgreSQL integration database",
+    reason="requires a schema-version-7 PostgreSQL integration database",
 )
 def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]
@@ -245,7 +245,7 @@ def test_postgres_run_jobs_are_tenant_scoped_and_release_the_operation_lease() -
 
 @pytest.mark.skipif(
     not os.environ.get("GREENLINE_TEST_DATABASE_URL"),
-    reason="requires a schema-version-6 PostgreSQL integration database",
+    reason="requires a schema-version-7 PostgreSQL integration database",
 )
 def test_postgres_run_admission_enforces_per_user_capacity_across_challenges() -> None:
     dsn = os.environ["GREENLINE_TEST_DATABASE_URL"]
