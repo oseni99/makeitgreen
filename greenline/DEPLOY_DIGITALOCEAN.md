@@ -8,6 +8,11 @@ This is a deployment runbook, not a claim that the server already exists. See
 [Current repository readiness](#current-repository-readiness) for the pieces
 that are ready and the pieces still missing.
 
+The security decision record for this runbook is
+[`THREAT_MODEL.md`](THREAT_MODEL.md). Do not open the beta until its G-1 through
+G-10 launch gates have passing evidence and the owner has recorded both required
+risk-acceptance decisions.
+
 ## Recommendation and expected cost
 
 Start with one DigitalOcean Basic Droplet:
@@ -79,21 +84,26 @@ unknown users or increasing concurrency.
 - Clerk authentication and authorized-party checking.
 - PostgreSQL learner state, Run Jobs, request admission, audits, and worker
   release heartbeats.
-- Five ordered PostgreSQL migrations.
+- Seven ordered PostgreSQL migrations.
 - `/health/live`, `/health/ready`, and exact-version `/health/release` checks.
 - CI tests, vulnerability scanning, SBOMs, provenance, immutable GHCR
   publication, protected promotion, and automatic rollback.
 
+### Already configured externally
+
+- `makeitgreen.dev` is registered in Cloudflare.
+- The Clerk Production instance uses Invite-only access, a signed
+  `beta_access` claim, and Google OAuth with custom production credentials.
+- Clerk's `accounts.makeitgreen.dev`, `clerk.makeitgreen.dev`, and email DNS
+  records were verified, and one invited user completed the hosted sign-in flow.
+
 ### Still needed before deployment
 
-- Commit the current timer and documentation changes.
-- Push this checkout to its configured GitHub repository. The `origin` remote
-  is `https://github.com/oseni99/makeitgreen.git`; it had no remote branch
-  references when checked on 2026-09-04, so there is no existing history to
-  reconcile.
+- Review, commit, and push the threat model and deployment reconciliation.
 - Configure the GitHub `VITE_CLERK_PUBLISHABLE_KEY` repository variable.
 - Create the DigitalOcean production Compose manifest and Caddyfile.
-- Create the production Clerk instance/domain configuration.
+- Add and verify the final deployed application origin in Clerk, then confirm
+  the frontend publishable key and backend secret belong to that same instance.
 - Provision the Droplet, DNS record, firewall, secrets, and persistent data
   directories.
 - Run migrations with a schema-owning database role and use a separate runtime
@@ -102,9 +112,6 @@ unknown users or increasing concurrency.
 - Select a destination for security JSON logs and operational alerts.
 - Bootstrap the initial four-image deployment. The promotion workflow expects
   an existing complete release to use as its rollback set.
-
-The current committed release is `6cad3580665386eec00cb08e1e8d5ea7ee36945c`.
-It does not include the uncommitted timer and architecture work.
 
 ## Step-by-step launch plan
 
@@ -331,11 +338,11 @@ execution image while handling a learner request.
 1. Start only PostgreSQL.
 2. Wait until `pg_isready` succeeds.
 3. Use a schema-owning administrative role to apply migrations `001` through
-   `005` in numerical order with `ON_ERROR_STOP=1`.
+   `007` in numerical order with `ON_ERROR_STOP=1`.
 4. Create a separate application role with connect, schema usage, table data,
    and sequence permissions—but no schema-changing privileges.
 5. Put the application role's URL in `database_url`.
-6. Validate that `greenline_schema_version` reports `5`.
+6. Validate that `greenline_schema_version` reports `7`.
 
 The exact migration order is documented in
 [`backend/migrations/README.md`](backend/migrations/README.md). Never let the

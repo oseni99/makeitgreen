@@ -1,6 +1,6 @@
 # MakeItGreen — Known Gaps & Improvement Backlog
 
-**Last reconciled with the codebase:** 2026-09-08
+**Last reconciled with the codebase:** 2026-09-10
 
 **Audience:** an agent (or engineer) picking up work on this codebase with no prior context.
 Read `README.md` first for architecture and how to run. This document is the honest,
@@ -44,7 +44,7 @@ the practice loop, editor failure navigation, and reliable checkpoint restoratio
 
 | Priority | Work | Why now |
 |---|---|---|
-| Now | Production threat model | Deployable artifacts exist; this is the next unmet prerequisite for public hosting |
+| Now | Review production threat model | Baseline documented in `THREAT_MODEL.md`; owner risk acceptance and launch-gate evidence remain |
 | Next | Deployment operations | Network isolation, secret rotation, observability, audit export, and recovery drills remain |
 | Beta validation | Observe path → run → solve → debrief → return conversion | Begin once a safely operated beta can collect real usage |
 | Later | Retention practice and weekly publishing workflow | Evaluate after the beta learning loop has real usage |
@@ -483,13 +483,13 @@ streaming jobs, isolated challenge dependencies, Monaco failure navigation, rest
 run checkpoints, the first three content batches and Node challenges, learning
 tracks/cadence, and the social-preview asset are implemented and tested.
 
-The next engineering deliverable is a production threat model covering the Control
-Plane, Execution Worker, Docker boundary, PostgreSQL, Clerk, Run Bundles, reverse proxy,
-and release pipeline. Use it to finalize direct-port isolation, secret rotation,
-collector-backed security alerts, durable audit export, backup/restore drills, registry
-retention, deployment-controller configuration, and permanent release-record export.
-Only after those controls are implemented and exercised should the hosted beta accept
-untrusted traffic and begin measuring the learning funnel.
+The baseline production threat model is now documented in
+[`THREAT_MODEL.md`](THREAT_MODEL.md). Review its two explicit beta risk acceptances and
+close launch gates G-1 through G-10 with durable evidence. Use it to finalize direct-port
+isolation, secret rotation, collector-backed security alerts, durable audit export,
+backup/restore drills, registry retention, deployment-controller configuration, and
+permanent release-record export. Only after those controls are implemented and exercised
+should the hosted beta accept untrusted traffic and begin measuring the learning funnel.
 
 This table tracks the currently identified backlog, including minor items; it is a
 living inventory rather than a guarantee that no further work will be discovered.
@@ -513,7 +513,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 9 | Platform tests + content validation CI foundation (gap 14) | S–M | Compounding | ✅ done |
 | 10 | Streaming runs + per-challenge venvs (gaps 8, 6) | L | Medium | ✅ done |
 | 11 | AI interviewer (gap 4) | L | Parked — owner said skip for now | ⏸ deferred |
-| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks hosting | ▶ next |
+| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks hosting | ◐ threat model drafted; owner review + operations next |
 | 13 | Multiple editor tabs (gap 12) | S–M | Medium | ✅ done |
 | 14 | Cmd+S save + "saved" indicator (gap 12) | S | Medium | ✅ done |
 | 15 | Unsaved-changes guard on navigation (gap 12) | S | Medium | ✅ done |
