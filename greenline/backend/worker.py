@@ -21,6 +21,11 @@ import run_coordination
 import runner
 
 
+DEFAULT_RUN_MEMORY_MIB = 512
+MIN_RUN_MEMORY_MIB = 128
+MAX_RUN_MEMORY_MIB = 4096
+
+
 @dataclass(frozen=True)
 class WorkerViolation:
     code: str
@@ -54,7 +59,26 @@ class WorkerRuntime:
         self.learner_state.close()
 
 
-def _container_adapter(source: Mapping[str, str]) -> runner.ContainerExecutionAdapter:
+def _run_memory_bytes(source: Mapping[str, str]) -> int:
+    try:
+        memory_mib = int(
+            source.get("GREENLINE_RUN_MEMORY_MIB", str(DEFAULT_RUN_MEMORY_MIB))
+        )
+    except ValueError as exc:
+        raise runner.ContainerExecutionConfigurationError(
+            "GREENLINE_RUN_MEMORY_MIB must be an integer"
+        ) from exc
+    if not MIN_RUN_MEMORY_MIB <= memory_mib <= MAX_RUN_MEMORY_MIB:
+        raise runner.ContainerExecutionConfigurationError(
+            "GREENLINE_RUN_MEMORY_MIB must be between "
+            f"{MIN_RUN_MEMORY_MIB} and {MAX_RUN_MEMORY_MIB}"
+        )
+    return memory_mib * 1024 * 1024
+
+
+def _container_adapter(
+    source: Mapping[str, str], *, memory_bytes: int | None = None
+) -> runner.ContainerExecutionAdapter:
     python_image = source.get("GREENLINE_PYTHON_EXECUTION_IMAGE", "").strip()
     node_image = source.get("GREENLINE_NODE_EXECUTION_IMAGE", "").strip()
     bundle_root = source.get("GREENLINE_RUN_BUNDLE_DIR", "").strip()
@@ -69,6 +93,9 @@ def _container_adapter(source: Mapping[str, str]) -> runner.ContainerExecutionAd
             bundle_root=bundle_root,
             docker_binary=source.get("GREENLINE_DOCKER_BINARY", "docker").strip()
             or "docker",
+            memory_bytes=(
+                _run_memory_bytes(source) if memory_bytes is None else memory_bytes
+            ),
         )
     )
 
@@ -141,10 +168,22 @@ def compose_worker(
             )
         )
 
+    try:
+        run_memory_bytes = _run_memory_bytes(source)
+    except runner.ContainerExecutionConfigurationError:
+        run_memory_bytes = DEFAULT_RUN_MEMORY_MIB * 1024 * 1024
+        violations.append(
+            WorkerViolation(
+                "invalid_run_memory",
+                "GREENLINE_RUN_MEMORY_MIB must be an integer between "
+                f"{MIN_RUN_MEMORY_MIB} and {MAX_RUN_MEMORY_MIB}",
+            )
+        )
+
     execution = supplied.execution
     if type(execution) is not runner.ContainerExecutionAdapter:
         try:
-            execution = _container_adapter(source)
+            execution = _container_adapter(source, memory_bytes=run_memory_bytes)
         except runner.ContainerExecutionConfigurationError:
             execution = None
             violations.append(

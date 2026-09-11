@@ -30,7 +30,7 @@ green run → solved state → solution page). A jsdom React integration test no
 that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
 validate both ways (broken repo fails, solution overlay passes) via
 `scripts/validate_challenges.py`.
-The backend currently has 233 passing platform tests covering composition/readiness,
+The backend currently has 247 passing platform tests covering composition/readiness,
 authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
@@ -44,8 +44,8 @@ the practice loop, editor failure navigation, and reliable checkpoint restoratio
 
 | Priority | Work | Why now |
 |---|---|---|
-| Now | Review production threat model | Baseline documented in `THREAT_MODEL.md`; owner risk acceptance and launch-gate evidence remain |
-| Next | Deployment operations | Network isolation, secret rotation, observability, audit export, and recovery drills remain |
+| Now | Deployment operations and capacity evidence | The owner reviewed the architecture; separate app/execution hosts and the G-1 through G-10 evidence remain |
+| Next | Operated beta validation | Run the named cohort/burst staging probe, close the launch gates, then observe real queue and learning-loop behavior |
 | Beta validation | Observe path → run → solve → debrief → return conversion | Begin once a safely operated beta can collect real usage |
 | Later | Retention practice and weekly publishing workflow | Evaluate after the beta learning loop has real usage |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
@@ -291,9 +291,18 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 - **Remaining deployment gate:** do not expose the service to untrusted users yet.
   The deployment platform must still provide secret delivery/rotation, direct-port
   network isolation, edge DDoS limits, a JSON-log collector with concrete alert rules,
-  durable audit export, backup/restore drills, and a reviewed threat model.
-- **Suggested sequence:** build the deployable control-plane artifact and threat model,
-  then add backup/restore and deployment smoke-test evidence in gap 15.
+  durable audit export, backup/restore drills, separate application/database and
+  execution hosts, and measured capacity evidence.
+- **Capacity baseline implemented:** one active run per learner is the fail-closed
+  default, global queued/running capacity remains independently bounded, per-host worker
+  concurrency stays configurable, and container memory is configurable with a validated
+  128–4096 MiB range. `scripts/execution_capacity_probe.py` defines a 15-learner burst,
+  50/100-learner five-minute cohorts, a 100-submission/10-second peak burst, and a
+  25-learner retry burst against a mixed Python/Node workload on the real PostgreSQL
+  queue and worker pool.
+- **Suggested sequence:** create the separate Compose deployments, close the network and
+  secret gates, then capture backup/restore, adversarial execution, and capacity evidence
+  in gap 15.
 
 ### 8. ~~Runs are synchronous and non-streaming~~ — CLOSED
 
@@ -388,7 +397,7 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 14. ~~Platform test coverage~~ — CLOSED
 
-- **Implemented:** 233 backend tests now also cover composition/readiness,
+- **Implemented:** 247 backend tests now also cover composition/readiness,
   authentication, tenant isolation, `progress.py` (attempts, sticky
   `solved_at`, non-downgrade, reset, concurrent SQLite, spoiled), `runner.py`
   (green/red/no-tests, stdout+stderr, truncation, container isolation policy), `challenges.py`
@@ -446,12 +455,15 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   Production deployment-platform secret rotation, direct-port network isolation, an external log
   collector/alerts, durable audit export, backup/restore policy and drills, registry
   retention policy, the hosting platform's tag-watcher/deployment-controller
-  configuration, and permanent external release-record export remain missing.
-- **Suggested:** the web/API control plane may serve `frontend/dist` from one image,
-  but untrusted test execution must be a separate isolated runner/job boundary rather
-  than a subprocess in that same container. Keep challenge content versioned or in
-  read-only object storage. Add backup/restore drills, deployment rollout integration,
-  structured log collection, and operational alerting before public traffic.
+  configuration, permanent external release-record export, separate production Compose
+  manifests, and real-host capacity evidence remain missing.
+- **Required deployment shape:** the web/API Control Plane may serve `frontend/dist`
+  from one image on the stateful application/database host. Untrusted test execution
+  must run on a separate execution host pool with no Clerk secret or public listener.
+  Start each 1 GiB staging worker at 384 MiB per run and concurrency one, then resize or
+  add workers based on named cohort/burst probe evidence rather than treating one as a
+  global production concurrency limit. Add backup/restore drills, deployment rollout
+  integration, structured log collection, and operational alerting before public traffic.
 
 ### 16. ~~Runtime state and generated files are not ignored~~ — CLOSED
 
@@ -483,9 +495,12 @@ streaming jobs, isolated challenge dependencies, Monaco failure navigation, rest
 run checkpoints, the first three content batches and Node challenges, learning
 tracks/cadence, and the social-preview asset are implemented and tested.
 
-The baseline production threat model is now documented in
-[`THREAT_MODEL.md`](THREAT_MODEL.md). Review its two explicit beta risk acceptances and
-close launch gates G-1 through G-10 with durable evidence. Use it to finalize direct-port
+The owner-reviewed production architecture is documented in
+[`THREAT_MODEL.md`](THREAT_MODEL.md): manual copying remains an accepted invite-only beta
+limitation, while untrusted execution must use hosts separate from the application and
+database. Close launch gates G-1 through G-10 with durable evidence, including the
+named 15/50/100-learner cohort/burst capacity probe and its explicit queue-start SLOs.
+Finalize direct-port
 isolation, secret rotation, collector-backed security alerts, durable audit export,
 backup/restore drills, registry retention, deployment-controller configuration, and
 permanent release-record export. Only after those controls are implemented and exercised
@@ -513,7 +528,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 9 | Platform tests + content validation CI foundation (gap 14) | S–M | Compounding | ✅ done |
 | 10 | Streaming runs + per-challenge venvs (gaps 8, 6) | L | Medium | ✅ done |
 | 11 | AI interviewer (gap 4) | L | Parked — owner said skip for now | ⏸ deferred |
-| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks hosting | ◐ threat model drafted; owner review + operations next |
+| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks hosting | ◐ architecture reviewed; deployment and capacity evidence next |
 | 13 | Multiple editor tabs (gap 12) | S–M | Medium | ✅ done |
 | 14 | Cmd+S save + "saved" indicator (gap 12) | S | Medium | ✅ done |
 | 15 | Unsaved-changes guard on navigation (gap 12) | S | Medium | ✅ done |

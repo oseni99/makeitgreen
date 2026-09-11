@@ -49,7 +49,7 @@ class AbuseControlPolicy:
     distinct_challenges_per_hour: int = 20
     solutions_per_hour: int = 5
     max_active_runs: int = 20
-    max_active_runs_per_user: int = 2
+    max_active_runs_per_user: int = 1
     audit_retention_days: int = 30
 
     def __post_init__(self) -> None:

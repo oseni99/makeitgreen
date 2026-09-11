@@ -41,7 +41,7 @@ class RunCapacityExceeded(RuntimeError):
 @dataclass(frozen=True)
 class RunAdmissionPolicy:
     max_active_runs: int = 20
-    max_active_runs_per_user: int = 2
+    max_active_runs_per_user: int = 1
 
     def __post_init__(self) -> None:
         if self.max_active_runs < 1 or self.max_active_runs_per_user < 1:

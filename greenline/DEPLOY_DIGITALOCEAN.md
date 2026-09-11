@@ -1,8 +1,8 @@
 # Launching the MakeItGreen beta on DigitalOcean
 
 This is the recommended low-cost deployment plan for an **invited beta**. It
-keeps the product's Hosted Mode safety boundaries but colocates the services on
-one virtual machine until usage justifies separate infrastructure.
+keeps untrusted Challenge Runs on execution hosts that are separate from the
+public Control Plane and PostgreSQL from the first beta release.
 
 This is a deployment runbook, not a claim that the server already exists. See
 [Current repository readiness](#current-repository-readiness) for the pieces
@@ -10,35 +10,76 @@ that are ready and the pieces still missing.
 
 The security decision record for this runbook is
 [`THREAT_MODEL.md`](THREAT_MODEL.md). Do not open the beta until its G-1 through
-G-10 launch gates have passing evidence and the owner has recorded both required
-risk-acceptance decisions.
+G-10 launch gates have passing evidence and the owner has recorded final launch
+approval.
 
 ## Recommendation and expected cost
 
-Start with one DigitalOcean Basic Droplet:
+Provision two 1 GiB Basic Droplets for staging, then resize or add execution
+workers until the capacity probe passes. The staging floor is:
 
 | Resource | Initial choice | Current price |
 |---|---|---:|
-| Droplet | 2 GiB RAM, 1 vCPU, 50 GiB SSD | $12/month |
-| Weekly Droplet backup | Recommended for beta | $2.40/month |
+| Application/database Droplet | 1 GiB RAM, 1 vCPU, 25 GiB SSD | $6/month |
+| Weekly application Droplet backup | Recommended for beta | $1.20/month |
+| Execution Worker Droplet | 1 GiB RAM, 1 vCPU, 25 GiB SSD | $6/month |
 | Cloud Firewall, VPC, and monitoring | Enabled | $0 |
-| PostgreSQL | Self-hosted on the Droplet | Included |
+| PostgreSQL | Self-hosted on the application Droplet | Included |
 | DNS | Existing registrar or a free DNS provider | Varies |
-| Total infrastructure | Before domain/email costs | About $14.40/month |
+| Staging floor | Before domain/email costs | About $13.20/month |
 
-DigitalOcean's current Basic Droplet table lists the 2 GiB configuration at
-$12/month. Weekly backups for Basic plans add 20% of the Droplet price. Verify
+DigitalOcean's current Basic Droplet table lists the 1 GiB configuration at
+$6/month. Weekly backups for Basic plans add 20% of the protected Droplet's
+price. The stateless worker does not need a Droplet backup. Verify
 the checkout total before creating anything because cloud pricing can change:
 
 - [Droplet pricing](https://www.digitalocean.com/pricing/droplets)
 - [Backup pricing](https://docs.digitalocean.com/products/backups/details/pricing/)
 
-A single Challenge Run is limited by the application to 512 MiB. With worker
-concurrency set to one, 2 GiB leaves room for the operating system, Control
-Plane, worker, PostgreSQL, reverse proxy, and one execution container. This is
-the minimum sensible beta size, not a promise for arbitrary traffic. Upgrade
-to the 2-vCPU/$18 plan if Challenge Runs make the API feel CPU-starved, or the
-4 GiB/$24 plan if memory alerts or swap activity appear.
+The 1 GiB worker is a staging baseline, not promised beta capacity. Set
+`GREENLINE_RUN_MEMORY_MIB=384` initially and use concurrency one only while
+proving isolation. Before inviting learners, run
+[`scripts/execution_capacity_probe.py`](scripts/execution_capacity_probe.py)
+with the named workload scenarios below. Resize the worker or add worker
+Droplets until every scenario meets its queue-start SLO. Keep at least 512 MiB
+outside the configured container limits for the worker host, Docker daemon, and
+operating system, and use the measured CPU and memory peaks rather than nominal
+RAM alone when choosing the pool.
+
+### What 15, 50, and 100 learners mean
+
+An **active learner** is someone editing during the scenario window; it does not
+mean that every learner has a container executing at the same instant. Each
+synthetic learner submits one run. **Worker concurrency** is the separate number
+of Challenge Run containers that can execute at once across the pool.
+
+| Scenario | Defined workload | p95 queue start | Maximum queue start |
+|---|---|---:|---:|
+| `small-burst` | 15 learners each submit once within 10 seconds | ≤ 30 seconds | ≤ 60 seconds |
+| `cohort-50` | 50 active learners each submit once during a five-minute cycle | ≤ 10 seconds | ≤ 30 seconds |
+| `cohort-100` | 100 active learners each submit once during a five-minute cycle | ≤ 10 seconds | ≤ 30 seconds |
+| `peak-burst-100` | 100 learners each submit once within 10 seconds | ≤ 30 seconds | ≤ 60 seconds |
+| `retry-burst` | 25 learners each retry once within 10 seconds | ≤ 30 seconds | ≤ 60 seconds |
+
+The default challenge mix rotates a short Python repository challenge, a Node
+challenge, and a more computational Python challenge. A red test result still
+counts as a successfully completed execution; failures here mean rejected,
+lost, timed-out, or infrastructure-failed Run Jobs. These definitions are the
+beta planning assumptions. Replace them only when observed product telemetry
+supports a different run frequency.
+
+For an initial worker estimate, use the normal-cohort measurements:
+
+```text
+slots ≈ ceiling(runs per second × p95 execution seconds × 1.25 headroom)
+```
+
+Then enforce the memory ceiling per host and run the probe; the formula is only
+a starting point. Bursts may queue within their 30-second SLO, so they do not
+require one execution slot per learner. A configuration passes only when the
+probe has zero admission rejections, zero lost/infrastructure-failed jobs, every
+job reaches a terminal state, the queue SLO passes, and host monitoring shows no
+OOM or swap pressure.
 
 ## Deployment shape
 
@@ -49,28 +90,28 @@ flowchart TB
     A --> P[(PostgreSQL container)]
     A --> K[Clerk]
     A -->|enqueue and poll| P
-    W[Execution Worker container] -->|claim and complete| P
-    W -->|Docker API| D[Host Docker daemon]
+    W[Execution Worker pool] -->|private VPC: claim and complete| P
+    W -->|local Docker API| D[Worker-host Docker daemon]
     D --> R[Disposable Challenge Run container]
 
-    subgraph One 2 GiB DigitalOcean Droplet
+    subgraph Application/database Droplet
       C
       A
       P
+    end
+
+    subgraph Separate execution Droplet pool
       W
       D
       R
     end
 ```
 
-Only Caddy exposes ports to the internet. PostgreSQL, the worker, and the
-Docker API are private. The Control Plane does not receive Docker access. The
-worker receives Docker access because that is its sole job.
-
-This is weaker than putting the worker on a separate machine: control and
-execution still share one host kernel. It is an explicit cost tradeoff for a
-small, authenticated beta. Move the worker first when opening registration to
-unknown users or increasing concurrency.
+Only Caddy exposes application ports to the internet. PostgreSQL listens on the
+application host's private VPC interface and accepts port 5432 only from tagged
+execution workers. Worker hosts expose no HTTP service. The Docker socket and
+Run Bundle directory exist only on each worker host, so a container or daemon
+compromise does not directly expose the Control Plane host or Clerk secret.
 
 ## Current repository readiness
 
@@ -101,11 +142,11 @@ unknown users or increasing concurrency.
 
 - Review, commit, and push the threat model and deployment reconciliation.
 - Configure the GitHub `VITE_CLERK_PUBLISHABLE_KEY` repository variable.
-- Create the DigitalOcean production Compose manifest and Caddyfile.
+- Create separate application and worker Compose manifests plus the Caddyfile.
 - Add and verify the final deployed application origin in Clerk, then confirm
   the frontend publishable key and backend secret belong to that same instance.
-- Provision the Droplet, DNS record, firewall, secrets, and persistent data
-  directories.
+- Provision both Droplets in one VPC, the DNS record, separate firewalls,
+  secrets, and persistent data directories.
 - Run migrations with a schema-owning database role and use a separate runtime
   role for the application.
 - Configure PostgreSQL-aware backups and test restoration.
@@ -145,8 +186,8 @@ come from the same release manifest.
    [`AUTH.md`](AUTH.md).
 3. Set Clerk access mode to **Invite-only**, add the `beta_access` session
    claim from `public_metadata.beta_access`, and grant it only to approved testers.
-4. Add the final application origin, for example
-   `https://beta.example.com`, to the Clerk configuration.
+4. Add the final application origin, `https://makeitgreen.dev`, to the Clerk
+   configuration.
 5. Keep the Clerk secret key for the server. Never put it in the frontend or
    commit it.
 6. Confirm the publishable key configured in GitHub belongs to this same Clerk
@@ -155,18 +196,24 @@ come from the same release manifest.
 Changing the publishable key requires a new image release; changing the secret
 key requires only a server secret update and restart.
 
-### Phase 3: create the DigitalOcean Droplet
+### Phase 3: create the DigitalOcean Droplets
 
 In the DigitalOcean control panel:
 
 1. Create a project for MakeItGreen.
-2. Create an Ubuntu 24.04 LTS Basic Droplet.
-3. Select 2 GiB RAM, 1 vCPU, and 50 GiB SSD.
-4. Choose the region closest to the initial testers.
-5. Authenticate with an SSH key; do not enable password login.
-6. Enable VPC networking and monitoring.
-7. Enable weekly backups.
-8. Give the Droplet a stable name such as `makeitgreen-beta-1`.
+2. Choose the region closest to the initial testers and create one VPC there.
+3. Create an Ubuntu 24.04 LTS Basic application/database Droplet with 1 GiB
+   RAM, 1 vCPU, and 25 GiB SSD.
+4. Create a separate Ubuntu 24.04 LTS Basic execution Droplet with the same
+   initial size. This is the minimum staging size and may need resizing before
+   beta.
+5. Attach both Droplets to the same VPC.
+6. Authenticate with SSH keys; do not enable password login.
+7. Enable monitoring on both Droplets and weekly backups only on the stateful
+   application/database Droplet.
+8. Give them stable names such as `makeitgreen-app-1` and
+   `makeitgreen-worker-1`. Give every future worker a common `execution-worker`
+   tag so firewall rules can address the pool.
 
 DigitalOcean's current production-ready setup recommends SSH keys, a non-root
 sudo user, VPC networking, monitoring, and backups:
@@ -174,41 +221,49 @@ sudo user, VPC networking, monitoring, and backups:
 
 ### Phase 4: create the network boundary
 
-Attach a DigitalOcean Cloud Firewall with these inbound rules:
+Attach an application Cloud Firewall with these inbound rules:
 
 | Protocol | Port | Source |
 |---|---:|---|
 | TCP | 22 | Your current administrator IP only |
 | TCP | 80 | All IPv4 and IPv6 addresses |
 | TCP | 443 | All IPv4 and IPv6 addresses |
+| TCP | 5432 | Droplets tagged `execution-worker` over the VPC only |
 
-Allow required outbound traffic so the application can reach Clerk, GHCR,
-package/image registries during deployment, DNS, and time services. Do not add
-inbound rules for PostgreSQL `5432`, FastAPI `8000`, or the Docker socket.
+Bind PostgreSQL only to the application Droplet's private VPC address; never
+publish it on `0.0.0.0`. Require TLS for the cross-host database connection.
+FastAPI port 8000 remains private to the application Compose network.
+
+Attach a worker Cloud Firewall that permits SSH only from the current
+administrator IP and has no public application ingress. Allow worker egress to
+PostgreSQL on the application Droplet's private VPC address, HTTPS for immutable
+image deployment, DNS, and time services. Challenge Run containers still use
+`--network none`, regardless of the worker host's egress policy. Never expose a
+Docker TCP socket.
 
 Cloud Firewalls are stateful and currently provided without an additional
 charge: [DigitalOcean Cloud Firewalls](https://docs.digitalocean.com/products/networking/firewalls/).
 
-### Phase 5: point the domain at the Droplet
+### Phase 5: point the domain at the application Droplet
 
-1. Add an `A` record such as `beta.example.com` pointing to the Droplet's IPv4
-   address.
+1. Add an `A` record for `makeitgreen.dev` pointing to the application
+   Droplet's public IPv4 address.
 2. Add an `AAAA` record only if IPv6 is configured and firewalled correctly.
 3. Wait for the record to resolve publicly.
 4. Do not start Caddy until the record points to the server; automatic
    certificate issuance needs the hostname to reach ports 80 and 443.
 
-### Phase 6: secure the host and install Docker
+### Phase 6: secure both hosts and install Docker
 
-1. SSH into the server as the initial account.
+1. SSH into each server as the initial account.
 2. Create a named non-root sudo administrator if the Droplet setup did not
    already create one.
 3. Apply Ubuntu security updates.
 4. Install Docker Engine and the Docker Compose plugin from Docker's official
    apt repository.
 5. Enable Docker at boot and verify `docker compose version`.
-6. Install the DigitalOcean monitoring agent if it was not installed during
-   provisioning.
+6. Install the DigitalOcean monitoring agent on both hosts if it was not
+   installed during provisioning.
 
 Use Docker's maintained installation instructions rather than Ubuntu's older
 convenience package:
@@ -219,40 +274,51 @@ server access and do not give application users shell accounts.
 
 ### Phase 7: create the deployment filesystem
 
-Use a small, explicit hierarchy such as:
+Use separate, explicit hierarchies. On the application/database host:
 
 ```text
 /srv/makeitgreen/
-├── compose.yaml
+├── compose.app.yaml
 ├── Caddyfile
 ├── release.env             image digest references only
 ├── secrets/                mode 0700; individual files mode 0600
 │   ├── clerk_secret_key
-│   ├── database_url
+│   ├── api_database_url
 │   ├── postgres_password
 │   └── security_log_hmac_key
 ├── postgres/               PostgreSQL data
 ├── caddy-data/             certificates and state
 ├── caddy-config/
-├── run-bundles/            temporary Run Bundle handoff
 └── backups/                encrypted/off-host export staging
 ```
 
-The Run Bundle directory must be mounted at the exact same absolute path in
-the worker and visible to the host Docker daemon. Bind-path resolution occurs
-on the daemon host, not inside the worker container.
+On every execution host:
+
+```text
+/srv/makeitgreen/
+├── compose.worker.yaml
+├── release.env             worker and execution-image digests only
+├── secrets/                mode 0700; individual files mode 0600
+│   ├── worker_database_url
+│   └── security_log_hmac_key
+└── run-bundles/            local temporary Run Bundle handoff
+```
+
+The Run Bundle directory is local to each execution host. Mount it into that
+host's worker at the exact same absolute path visible to that host's Docker
+daemon. The Control Plane never mounts or shares this directory.
 
 ### Phase 8: configure production Compose
 
-The Compose deployment should contain exactly four long-lived services:
+The application Compose deployment contains exactly three long-lived services:
 
 1. `caddy`
 2. `control-plane`
-3. `execution-worker`
-4. `postgres`
+3. `postgres`
 
-It must also pre-pull the two execution images used for disposable Challenge
-Runs. Important settings:
+Each worker Compose deployment contains only `execution-worker`; disposable
+Challenge Run containers are created through the host Docker daemon. Important
+settings:
 
 - Only Caddy publishes host ports.
 - Caddy reverse-proxies to `control-plane:8000` and obtains HTTPS
@@ -262,24 +328,33 @@ Runs. Important settings:
   network can supply forwarded headers.
 - Mount Clerk, database, and security-log secrets as read-only files and use
   the application's `_FILE` environment variables.
-- Keep PostgreSQL on the internal network with no published port.
+- Publish PostgreSQL only on the application host's private VPC address and
+  protect it with PostgreSQL TLS plus the Cloud Firewall worker-tag rule.
 - Give PostgreSQL a persistent data mount.
-- Mount the Docker socket only into `execution-worker`, never into
-  `control-plane`.
+- Mount the Docker socket only into `execution-worker` on execution hosts. The
+  application host must not expose or mount Docker authority into the Control
+  Plane.
 - Mount the host Run Bundle directory into the worker at the same absolute
   path.
 - Use read-only roots, dropped capabilities, `no-new-privileges`, PID limits,
   and bounded `tmpfs` mounts where supported.
-- Configure `restart: unless-stopped` and health checks.
-- Set all three beta capacity values to one:
+- Configure `restart: unless-stopped` and health checks on both deployments.
+- Configure one active run per learner, then derive the global queue bound and
+  each host's concurrency from the capacity probe:
 
   ```text
-  GREENLINE_WORKER_CONCURRENCY=1
-  GREENLINE_MAX_ACTIVE_RUNS=1
   GREENLINE_MAX_ACTIVE_RUNS_PER_USER=1
+  GREENLINE_MAX_ACTIVE_RUNS=<bounded queue capacity>
+  GREENLINE_WORKER_CONCURRENCY=<measured safe slots on this host>
+  GREENLINE_RUN_MEMORY_MIB=384
   ```
 
-The worker image runs as UID `65532`. The Compose service must receive only the
+  `GREENLINE_MAX_ACTIVE_RUNS` must match on the Control Plane and every worker.
+  `GREENLINE_WORKER_CONCURRENCY` is per execution host. Start it at one only for
+  staging isolation checks; do not use that value for beta unless the capacity
+  evidence passes.
+
+The worker image runs as UID `65532`. Each worker service must receive only the
 Docker socket's numeric group as a supplemental group. This socket still grants
 host-level Docker authority, which is why it belongs only on the worker.
 
@@ -288,7 +363,7 @@ host-level Docker authority, which is why it belongs only on the worker.
 Create strong, independent values for:
 
 - the PostgreSQL administrative password;
-- the application database password;
+- separate Control Plane and worker database passwords;
 - `GREENLINE_LOG_HMAC_KEY` with at least 32 random bytes;
 - the Clerk secret key.
 
@@ -296,11 +371,11 @@ The Control Plane needs:
 
 ```text
 CLERK_SECRET_KEY_FILE=/run/secrets/clerk_secret_key
-CLERK_AUTHORIZED_PARTIES=https://beta.example.com
-GREENLINE_DATABASE_URL_FILE=/run/secrets/database_url
+CLERK_AUTHORIZED_PARTIES=https://makeitgreen.dev
+GREENLINE_DATABASE_URL_FILE=/run/secrets/api_database_url
 GREENLINE_LOG_HMAC_KEY_FILE=/run/secrets/security_log_hmac_key
 GREENLINE_TRUSTED_PROXY_CIDRS=172.30.0.0/24
-GREENLINE_MAX_ACTIVE_RUNS=1
+GREENLINE_MAX_ACTIVE_RUNS=<bounded queue capacity from the probe>
 GREENLINE_MAX_ACTIVE_RUNS_PER_USER=1
 GREENLINE_CONTENT_READS_PER_MINUTE=120
 GREENLINE_DISTINCT_CHALLENGES_PER_HOUR=20
@@ -310,24 +385,32 @@ GREENLINE_SOLUTIONS_PER_HOUR=5
 The worker needs:
 
 ```text
-GREENLINE_DATABASE_URL_FILE=/run/secrets/database_url
+GREENLINE_DATABASE_URL_FILE=/run/secrets/worker_database_url
 GREENLINE_LOG_HMAC_KEY_FILE=/run/secrets/security_log_hmac_key
 GREENLINE_PYTHON_EXECUTION_IMAGE=<exact digest reference>
 GREENLINE_NODE_EXECUTION_IMAGE=<exact digest reference>
 GREENLINE_RUN_BUNDLE_DIR=/srv/makeitgreen/run-bundles
-GREENLINE_WORKER_CONCURRENCY=1
-GREENLINE_MAX_ACTIVE_RUNS=1
+GREENLINE_RUN_MEMORY_MIB=384
+GREENLINE_WORKER_CONCURRENCY=<measured safe slots on this host>
+GREENLINE_MAX_ACTIVE_RUNS=<same bounded queue capacity as the Control Plane>
 GREENLINE_MAX_ACTIVE_RUNS_PER_USER=1
 ```
+
+The worker database URL uses the application Droplet's private VPC hostname or
+address with certificate verification enabled. The worker role needs only the
+learner-state and Run Job reads/writes required to claim and complete work; it
+must not receive Clerk credentials, schema ownership, or administrative
+PostgreSQL privileges.
 
 `GREENLINE_RELEASE_SHA` is baked into the official API and worker images. Do
 not override it at runtime.
 
 ### Phase 10: authenticate to GHCR and pull the release
 
-If the GitHub packages are private, create a narrowly scoped credential that
-can read packages. Log the server into `ghcr.io`, then pull all four exact
-digest references from the successful release manifest.
+If the GitHub packages are private, create narrowly scoped credentials that can
+read packages. Pull only the Control Plane image on the application host. Pull
+the worker plus both execution images on every execution host. All four exact
+digest references still come from one successful release manifest.
 
 Verify locally that every configured reference contains `@sha256:`. Hosted
 Mode deliberately rejects mutable execution-image tags and never pulls an
@@ -339,9 +422,10 @@ execution image while handling a learner request.
 2. Wait until `pg_isready` succeeds.
 3. Use a schema-owning administrative role to apply migrations `001` through
    `007` in numerical order with `ON_ERROR_STOP=1`.
-4. Create a separate application role with connect, schema usage, table data,
-   and sequence permissions—but no schema-changing privileges.
-5. Put the application role's URL in `database_url`.
+4. Create separate Control Plane and execution-worker roles with connect,
+   schema usage, only their required table/sequence permissions, and no
+   schema-changing privileges.
+5. Put the corresponding role URL in each host's secret file.
 6. Validate that `greenline_schema_version` reports `7`.
 
 The exact migration order is documented in
@@ -352,26 +436,30 @@ API automatically mutate its schema during startup.
 
 Start the services in this order:
 
-1. PostgreSQL
-2. Execution images pre-pulled into the host daemon
-3. Execution Worker
+1. PostgreSQL on the application host
+2. Execution images pre-pulled into every worker-host daemon
+3. The complete Execution Worker pool
 4. Control Plane
 5. Caddy
 
 Then verify:
 
 ```text
-https://beta.example.com/health/live
-https://beta.example.com/health/ready
-https://beta.example.com/health/release
+https://makeitgreen.dev/health/live
+https://makeitgreen.dev/health/ready
+https://makeitgreen.dev/health/release
 ```
 
 `/health/release` must return HTTP 200 and show:
 
 - the expected full source commit;
-- at least one live matching worker;
+- the expected count of live matching workers;
 - the exact Python execution-image digest;
 - the exact Node execution-image digest.
+
+Verify from outside the VPC that PostgreSQL 5432, FastAPI 8000, every worker,
+and the Docker API are unreachable. Verify from a worker host that its
+certificate-verified PostgreSQL connection succeeds over the private VPC.
 
 Finally, sign in as a beta learner, edit a file, refresh the page, run one
 Python challenge and one Node challenge, inspect run history, and reset a
@@ -384,8 +472,8 @@ Droplet snapshots alone are not a sufficient database recovery plan because
 they are crash-consistent system images and may affect disk performance during
 capture. Use both:
 
-1. weekly Droplet backups for whole-server recovery; and
-2. a scheduled PostgreSQL logical dump encrypted and copied off the Droplet.
+1. weekly application-Droplet backups for whole-server recovery; and
+2. a scheduled PostgreSQL logical dump encrypted and copied off that Droplet.
 
 Test a restore into a disposable database before inviting users. Alert on:
 
@@ -397,17 +485,43 @@ Test a restore into a disposable database before inviting users. Alert on:
 - growing queued Run Jobs;
 - repeated security events or rate-limit exhaustion.
 
+Set separate memory alerts on the application host and every execution host so
+an unhealthy worker cannot hide behind healthy aggregate utilization.
+
 ### Phase 14: open the invited beta
 
 1. Keep Clerk in Invite-only mode and grant `beta_access: true` only to the
    short list of approved testers.
-2. Keep worker concurrency at one.
-3. Set a DigitalOcean billing alert.
-4. Observe queue time, execution duration, container failures, memory, and
-   PostgreSQL size for at least one week.
-5. Upgrade vertically before increasing worker concurrency: choose the
-   2-vCPU/$18 plan for CPU contention or the 4-GiB/$24 plan for memory pressure.
-6. Move the worker to its own Droplet before opening anonymous registration.
+2. On the disposable staging database connected to the real worker pool, run:
+
+   ```bash
+   GREENLINE_CAPACITY_PROBE_ACK=disposable-staging \
+   GREENLINE_TEST_DATABASE_URL_FILE=/run/secrets/capacity_probe_database_url \
+   python scripts/execution_capacity_probe.py \
+     --scenarios small-burst cohort-50 cohort-100 peak-burst-100 retry-burst \
+     --slugs config-merge webhook-batch-node report-latency \
+     --worker-count <number-of-worker-droplets> \
+     --worker-concurrency <slots-per-worker> \
+     --run-memory-mib 384 \
+     --global-active-limit <configured-global-limit> \
+     --output capacity-evidence.json
+   ```
+
+   The probe creates synthetic learner and run records, bypasses Clerk and the
+   public API, and therefore must never target production. It exercises the
+   actual PostgreSQL queue, worker pool, execution images, and Docker limits.
+3. Resize workers or add identically configured worker Droplets until every
+   named scenario admits and completes every run, normal cohorts meet their
+   ten-second p95/30-second maximum queue-start SLO, and bursts meet their
+   30-second p95/60-second maximum SLO. Then repeat one small end-to-end test
+   through the public API to cover Clerk and edge overhead.
+4. Keep `GREENLINE_MAX_ACTIVE_RUNS_PER_USER=1`. Set the global active limit high
+   enough for the measured worker slots plus a short bounded burst queue; it is
+   not a global concurrency setting and must not be set to one.
+5. Set a DigitalOcean billing alert.
+6. Observe queue wait, execution duration, container failures, per-host memory,
+   worker count, and PostgreSQL size for at least one week. Add workers before
+   a named scenario's queue-start SLO is exceeded.
 
 ## Why not Railway?
 
@@ -435,7 +549,8 @@ possible alternatives are:
 
 1. **Hybrid deployment:** Railway hosts the Control Plane and PostgreSQL while
    a separate VPS hosts the worker. This adds cross-provider networking,
-   credentials, cost, and failure modes without helping the small beta.
+   credentials, cost, and failure modes compared with keeping both trust zones
+   inside one DigitalOcean VPC.
 2. **Rewrite the execution adapter:** use an external sandbox API or Railway's
    emerging VM/sandbox primitive instead of Docker. Railway currently lists
    those VMs as beta/Priority Boarding and prices them separately at much
@@ -458,16 +573,17 @@ boundary.
 
 ## Upgrade path
 
-The single-Droplet beta does not trap the product in this topology:
+The two-zone beta can scale execution independently from the application:
 
-1. Resize to 2 vCPUs when execution competes with the API, or to 4 GiB when
-   memory becomes the constraint.
-2. Move the Execution Worker and its dedicated/rootless Docker daemon to a
-   private second Droplet when trust or concurrency becomes the constraint.
-3. Move PostgreSQL to a managed service when database operations and recovery
-   become the constraint.
-4. Add multiple workers only after the queue and fenced-lease metrics show the
-   need.
+1. Add worker Droplets when queue wait grows but a single host's memory and CPU
+   are already safely utilized. PostgreSQL `SKIP LOCKED` claims and fenced
+   leases distribute jobs without a separate broker.
+2. Resize an execution host when its own CPU or memory is the bottleneck, then
+   rerun the capacity probe before raising its concurrency.
+3. Resize or separate the application and PostgreSQL when API latency, database
+   memory, or recovery operations become the constraint.
+4. Move PostgreSQL to a managed service when database operations and recovery
+   justify the added cost.
 5. Consider a sandbox provider or VM-per-run adapter only when its operational
    savings justify an execution-layer change.
 

@@ -115,7 +115,11 @@ def _challenge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _adapter(
-    fake_docker: Path, *, bundle_root: Path, timeout: float = 2
+    fake_docker: Path,
+    *,
+    bundle_root: Path,
+    timeout: float = 2,
+    memory_bytes: int = 512 * 1024 * 1024,
 ) -> runner.ContainerExecutionAdapter:
     return runner.ContainerExecutionAdapter(
         runner.ContainerExecutionPolicy(
@@ -124,6 +128,7 @@ def _adapter(
             bundle_root=str(bundle_root),
             docker_binary=str(fake_docker),
             timeout_seconds=timeout,
+            memory_bytes=memory_bytes,
         )
     )
 
@@ -251,6 +256,35 @@ def test_container_adapter_isolates_and_normalizes_a_user_scoped_run(
     assert any(call[:3] == ["start", "--attach", container_name] for call in calls)
     assert any(call[0] == "cp" for call in calls)
     assert calls[-1][:2] == ["rm", "--force"]
+
+
+def test_container_command_uses_configured_memory_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _challenge(tmp_path, monkeypatch)
+    fake_docker, record = _fake_docker(tmp_path)
+    monkeypatch.setenv("FAKE_DOCKER_RECORD", str(record))
+    memory_bytes = 384 * 1024 * 1024
+    bundle_root = tmp_path / "shared-run-bundles"
+    bundle_root.mkdir()
+
+    _adapter(
+        fake_docker,
+        bundle_root=bundle_root,
+        memory_bytes=memory_bytes,
+    ).execute(
+        runner.ChallengeRun(
+            "container-contract",
+            user_id="user-a",
+            workspace={"answer.txt": "green\n"},
+        )
+    )
+
+    calls = json.loads(record.read_text())
+    create = next(call for call in calls if call[0] == "create")
+    adjacent = set(zip(create, create[1:]))
+    assert ("--memory", str(memory_bytes)) in adjacent
+    assert ("--memory-swap", str(memory_bytes)) in adjacent
 
 
 def test_container_timeout_is_reported_and_container_is_force_removed(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import threading
+import time
+from collections import deque
 from typing import Any
 from uuid import uuid4
 
@@ -106,6 +108,114 @@ def test_worker_executes_the_enqueued_snapshot_and_publishes_the_result() -> Non
     assert jobs.output == "one test passed\n"
     assert jobs.result is not None and jobs.result["green"] is True
     assert jobs.failed is None
+
+
+class _ManyJobsAdapter:
+    def __init__(self, users: int) -> None:
+        self._lock = threading.Lock()
+        self._claims = deque(
+            run_coordination.RunJobClaim(
+                job_id=uuid4(),
+                user_id=f"learner-{index}",
+                slug="demo",
+                session_elapsed_ms=None,
+                workspace_revision=7,
+                fence=1,
+                claim_token=uuid4(),
+                worker_id="",
+            )
+            for index in range(users)
+        )
+        self.completed = 0
+        self.failed = 0
+        self.finished = threading.Event()
+        self._expected = users
+
+    def claim(self, worker_id: str):
+        with self._lock:
+            if not self._claims:
+                return None
+            claim = self._claims.popleft()
+        return run_coordination.RunJobClaim(
+            **{
+                **vars(claim),
+                "worker_id": worker_id,
+            }
+        )
+
+    def heartbeat(self, claim) -> None:
+        return None
+
+    def append_output(self, claim, chunk: str) -> None:
+        return None
+
+    def complete(self, claim, completion) -> None:
+        with self._lock:
+            self.completed += 1
+            if self.completed + self.failed == self._expected:
+                self.finished.set()
+
+    def fail(self, claim, public_error: str) -> None:
+        with self._lock:
+            self.failed += 1
+            if self.completed + self.failed == self._expected:
+                self.finished.set()
+
+
+class _ConcurrencyRecordingExecution:
+    def __init__(self, expected_concurrency: int) -> None:
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+        self._expected_concurrency = expected_concurrency
+        self._first_wave_ready = threading.Event()
+
+    def execute(self, request, on_output=None):
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+            if self._active == self._expected_concurrency:
+                self._first_wave_ready.set()
+        assert self._first_wave_ready.wait(timeout=1)
+        time.sleep(0.002)
+        with self._lock:
+            self._active -= 1
+        return {
+            "green": True,
+            "passed": 1,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "exit_code": 0,
+            "output": "",
+            "tests": [],
+        }
+
+
+@pytest.mark.parametrize("active_users", [15, 50, 100])
+def test_worker_pool_serves_distinct_active_users_concurrently(
+    active_users: int,
+) -> None:
+    workers = 4
+    jobs = _ManyJobsAdapter(active_users)
+    execution = _ConcurrencyRecordingExecution(workers)
+    worker = run_coordination.RunJobWorker(
+        jobs,
+        _SnapshotState(),
+        execution,
+        workers=workers,
+        poll_interval=0.001,
+    )
+
+    worker.start()
+    try:
+        assert jobs.finished.wait(timeout=5)
+    finally:
+        worker.stop()
+
+    assert jobs.completed == active_users
+    assert jobs.failed == 0
+    assert execution.max_active == workers
 
 
 class _ReleaseRowsCursor:

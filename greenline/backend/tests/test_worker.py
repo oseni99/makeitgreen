@@ -13,6 +13,7 @@ from worker import (
     WorkerAdapters,
     WorkerConfigurationError,
     WorkerRuntime,
+    _container_adapter,
     _report_release_until_stopped,
     compose_worker,
 )
@@ -117,6 +118,19 @@ def test_worker_composes_only_with_ready_container_and_durable_adapters(
     runtime.close()
 
 
+def test_worker_applies_configured_run_memory(tmp_path: Path) -> None:
+    adapter = _container_adapter(
+        _environment(
+            GREENLINE_PYTHON_EXECUTION_IMAGE=f"greenline-python@{IMAGE_DIGEST}",
+            GREENLINE_NODE_EXECUTION_IMAGE=f"greenline-node@{IMAGE_DIGEST}",
+            GREENLINE_RUN_BUNDLE_DIR=str(tmp_path),
+            GREENLINE_RUN_MEMORY_MIB="384",
+        )
+    )
+
+    assert adapter.policy.memory_bytes == 384 * 1024 * 1024
+
+
 def test_worker_refuses_an_unavailable_execution_runtime(tmp_path: Path) -> None:
     missing = tmp_path / "missing-docker"
     with pytest.raises(WorkerConfigurationError) as raised:
@@ -178,3 +192,11 @@ def test_worker_concurrency_is_bounded(concurrency: str) -> None:
         compose_worker(_environment(GREENLINE_WORKER_CONCURRENCY=concurrency))
 
     assert "invalid_worker_concurrency" in _codes(raised.value)
+
+
+@pytest.mark.parametrize("memory_mib", ["127", "4097", "many"])
+def test_worker_run_memory_is_bounded(memory_mib: str) -> None:
+    with pytest.raises(WorkerConfigurationError) as raised:
+        compose_worker(_environment(GREENLINE_RUN_MEMORY_MIB=memory_mib))
+
+    assert "invalid_run_memory" in _codes(raised.value)
