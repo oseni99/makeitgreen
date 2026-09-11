@@ -4,6 +4,12 @@ Hosted Mode never creates or alters its schema while serving traffic. Apply
 the numbered SQL migrations in order during deployment, using a role allowed
 to perform DDL. The application role should only receive data access.
 
+`GREENLINE_DATABASE_URL` below means a direct administrative connection when
+running migrations. A pooled runtime URL is acceptable for the API and worker,
+but dump, restore, and migration tools must use a direct URL. Keep the direct
+schema-owner URL out of the runtime containers and their secret files. See
+[`../../MIGRATE_NEON.md`](../../MIGRATE_NEON.md) for the post-beta Neon cutover.
+
 For a fresh database:
 
 ```bash

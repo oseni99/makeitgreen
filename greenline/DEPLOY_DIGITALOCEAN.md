@@ -8,6 +8,19 @@ This is a deployment runbook, not a claim that the server already exists. See
 [Current repository readiness](#current-repository-readiness) for the pieces
 that are ready and the pieces still missing.
 
+The database hosting decision has two explicit stages:
+
+1. The invited beta uses self-hosted PostgreSQL on the application Droplet so
+   both trust zones remain inside one DigitalOcean VPC while capacity and the
+   learning loop are still being proven.
+2. Before the broader public launch, rehearse and perform the controlled Neon
+   cutover in [`MIGRATE_NEON.md`](MIGRATE_NEON.md). The application and worker
+   remain provider-neutral; only their database secret files change.
+
+Do not combine the database move with the first public launch. Complete the
+cutover, observe the Neon-backed deployment, and approve it before opening the
+larger cohort.
+
 The security decision record for this runbook is
 [`THREAT_MODEL.md`](THREAT_MODEL.md). Do not open the beta until its G-1 through
 G-10 launch gates have passing evidence and the owner has recorded final launch
@@ -411,6 +424,21 @@ learner-state and Run Job reads/writes required to claim and complete work; it
 must not receive Clerk credentials, schema ownership, or administrative
 PostgreSQL privileges.
 
+For beta, both runtime URLs target the private-VPC PostgreSQL service. Preserve
+this boundary from the first deployment:
+
+- runtime URLs live only in `api_database_url` and `worker_database_url`;
+- the schema-owner URL is used interactively for migrations and is never
+  mounted into either runtime container;
+- no image, Compose manifest, or application setting contains a database host;
+- PostgreSQL's major version is recorded with each restore drill so the future
+  Neon project can be created on the same version.
+
+After the Neon cutover, the two runtime secret files contain Neon **pooled**
+TLS URLs. Dumps, restores, schema migrations, and administrative validation use
+a separate Neon **direct** URL. Never put that direct administrative URL into a
+long-lived application or worker secret.
+
 `GREENLINE_RELEASE_SHA` is baked into the official API and worker images. Do
 not override it at runtime.
 
@@ -496,6 +524,11 @@ Test a restore into a disposable database before inviting users. Alert on:
 
 Set separate memory alerts on the application host and every execution host so
 an unhealthy worker cannot hide behind healthy aggregate utilization.
+
+Keep the logical dumps in custom format with ownership and ACLs excluded, and
+record the PostgreSQL client/server versions beside each artifact. At least one
+restore drill must also exercise the source-to-Neon rehearsal described in
+[`MIGRATE_NEON.md`](MIGRATE_NEON.md) before the public-launch cutover.
 
 ### Phase 14: open the invited beta
 
@@ -591,8 +624,9 @@ The two-zone beta can scale execution independently from the application:
    rerun the capacity probe before raising its concurrency.
 3. Resize or separate the application and PostgreSQL when API latency, database
    memory, or recovery operations become the constraint.
-4. Move PostgreSQL to a managed service when database operations and recovery
-   justify the added cost.
+4. After the invited beta, execute the rehearsed
+   [`MIGRATE_NEON.md`](MIGRATE_NEON.md) cutover and observe the managed database
+   before the public launch.
 5. Consider a sandbox provider or VM-per-run adapter only when its operational
    savings justify an execution-layer change.
 

@@ -462,7 +462,9 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   must run on a separate execution host pool with no Clerk secret or public listener.
   Start each 1 GiB staging worker at 384 MiB per run and concurrency one, then resize or
   add workers based on named cohort/burst probe evidence rather than treating one as a
-  global production concurrency limit. Add backup/restore drills, deployment rollout
+  global production concurrency limit. The invited beta keeps PostgreSQL on the
+  application Droplet; before the public launch, rehearse and complete the provider-neutral
+  Neon cutover in [`MIGRATE_NEON.md`](MIGRATE_NEON.md). Add backup/restore drills, deployment rollout
   integration, structured log collection, and operational alerting before public traffic.
 
 ### 16. ~~Runtime state and generated files are not ignored~~ — CLOSED
