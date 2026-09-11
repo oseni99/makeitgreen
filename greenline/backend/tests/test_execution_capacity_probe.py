@@ -3,9 +3,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
+
+import execution_capacity_probe as probe  # noqa: E402
 
 from execution_capacity_probe import (  # noqa: E402
     SCENARIOS,
@@ -23,6 +27,7 @@ def test_capacity_summary_passes_only_when_every_job_meets_the_start_slo() -> No
     passing_rows = [
         {
             "status": "completed",
+            "result": {"exit_code": 0},
             "queue_wait_ms": 500 + index,
             "execution_ms": 1000 + index,
         }
@@ -49,7 +54,12 @@ def test_capacity_summary_passes_only_when_every_job_meets_the_start_slo() -> No
 
 def test_capacity_summary_fails_on_missing_or_failed_jobs() -> None:
     rows = [
-        {"status": "completed", "queue_wait_ms": 100, "execution_ms": 200},
+        {
+            "status": "completed",
+            "result": {"exit_code": 0},
+            "queue_wait_ms": 100,
+            "execution_ms": 200,
+        },
         {"status": "failed", "queue_wait_ms": None, "execution_ms": None},
     ]
 
@@ -67,7 +77,12 @@ def test_capacity_summary_fails_on_missing_or_failed_jobs() -> None:
 
 def test_capacity_summary_fails_when_admission_rejects_a_learner() -> None:
     rows = [
-        {"status": "completed", "queue_wait_ms": 100, "execution_ms": 200}
+        {
+            "status": "completed",
+            "result": {"exit_code": 0},
+            "queue_wait_ms": 100,
+            "execution_ms": 200,
+        }
         for _ in range(14)
     ]
 
@@ -85,7 +100,12 @@ def test_capacity_summary_fails_when_admission_rejects_a_learner() -> None:
 
 def test_capacity_summary_enforces_the_maximum_queue_wait() -> None:
     rows = [
-        {"status": "completed", "queue_wait_ms": 100, "execution_ms": 200}
+        {
+            "status": "completed",
+            "result": {"exit_code": 0},
+            "queue_wait_ms": 100,
+            "execution_ms": 200,
+        }
         for _ in range(100)
     ]
     rows[-1]["queue_wait_ms"] = 5001
@@ -133,3 +153,112 @@ def test_named_scenarios_define_cohorts_bursts_and_their_slos() -> None:
         SCENARIOS["retry-burst"].target_start_ms,
         SCENARIOS["retry-burst"].target_max_start_ms,
     ) == (25, 10, 30_000, 60_000)
+
+
+@pytest.mark.parametrize("exit_code", [-1, 137, 125, 2, 3, 4, 5, None, "0"])
+def test_capacity_summary_rejects_execution_errors(exit_code) -> None:
+    summary = summarize_scenario(
+        1,
+        [
+            {
+                "status": "completed",
+                "result": {"exit_code": exit_code},
+                "queue_wait_ms": 100,
+                "execution_ms": 200,
+            }
+        ],
+        target_start_ms=3000,
+        target_max_start_ms=5000,
+    )
+    assert summary["passed"] is False
+    assert summary["execution_failures"] == 1
+
+
+@pytest.mark.parametrize("result", [None, {}, [], "invalid"])
+def test_capacity_summary_requires_execution_evidence(result) -> None:
+    summary = summarize_scenario(
+        1,
+        [
+            {
+                "status": "completed",
+                "result": result,
+                "queue_wait_ms": 100,
+                "execution_ms": 200,
+            }
+        ],
+        target_start_ms=3000,
+        target_max_start_ms=5000,
+    )
+    assert summary["passed"] is False
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_capacity_summary_accepts_green_and_red_test_runs(exit_code) -> None:
+    summary = summarize_scenario(
+        1,
+        [
+            {
+                "status": "completed",
+                "result": {"exit_code": exit_code},
+                "queue_wait_ms": 100,
+                "execution_ms": 200,
+            }
+        ],
+        target_start_ms=3000,
+        target_max_start_ms=5000,
+    )
+    assert summary["passed"] is True
+
+
+@pytest.mark.parametrize("enqueue_seconds, expected_pass", [(0.01, True), (0.5, False)])
+def test_burst_requires_submissions_within_the_arrival_window(
+    monkeypatch, enqueue_seconds, expected_pass
+) -> None:
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    clock = Clock()
+
+    class Jobs:
+        def enqueue(self, request):
+            clock.sleep(enqueue_seconds)
+            return {"job_id": request.user_id}
+
+        def get(self, job_id, *, user_id):
+            # Completion polling must not count toward the arrival window.
+            clock.sleep(1)
+            return {"status": "completed"}
+
+    def timing_rows(dsn, jobs):
+        return [
+            {
+                "status": "completed",
+                "result": {"exit_code": 1},
+                "queue_wait_ms": 100,
+                "execution_ms": 200,
+            }
+            for job in jobs
+        ]
+
+    monkeypatch.setattr(probe.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(probe.time, "sleep", clock.sleep)
+    monkeypatch.setattr(probe, "_timing_rows", timing_rows)
+    summary = probe.run_scenario(
+        Jobs(),
+        "unused",
+        scenario=SCENARIOS["peak-burst-100"],
+        slugs=["config-merge"],
+        poll_interval=0.25,
+        timeout_seconds=600,
+    )
+    assert summary["passed"] is expected_pass
+    assert summary["arrival_window_met"] is expected_pass
+    assert summary["actual_arrival_window_seconds"] == pytest.approx(
+        9.91 if expected_pass else 50.0
+    )

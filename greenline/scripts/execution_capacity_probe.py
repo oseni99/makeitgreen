@@ -111,6 +111,15 @@ def nearest_rank(values: Sequence[float], percentile: float) -> float | None:
     return ordered[rank - 1]
 
 
+def _execution_finished(result: Any) -> bool:
+    # Both supported test runners use 0 for green and 1 for failing tests.
+    # Missing evidence, timeouts, signals, and runner errors must fail the gate.
+    if not isinstance(result, dict):
+        return False
+    exit_code = result.get("exit_code")
+    return type(exit_code) is int and exit_code in {0, 1}
+
+
 def summarize_scenario(
     active_learners: int,
     rows: Sequence[dict[str, Any]],
@@ -131,6 +140,11 @@ def summarize_scenario(
     ]
     completed = sum(row.get("status") == "completed" for row in rows)
     failed = sum(row.get("status") == "failed" for row in rows)
+    execution_failures = sum(
+        row.get("status") == "completed"
+        and not _execution_finished(row.get("result"))
+        for row in rows
+    )
     p95_queue_wait_ms = nearest_rank(queue_waits, 0.95)
     max_queue_wait_ms = max(queue_waits, default=None)
     passed = bool(
@@ -138,6 +152,7 @@ def summarize_scenario(
         and rejected == 0
         and completed == active_learners
         and failed == 0
+        and execution_failures == 0
         and len(queue_waits) == active_learners
         and p95_queue_wait_ms is not None
         and p95_queue_wait_ms <= target_start_ms
@@ -150,6 +165,7 @@ def summarize_scenario(
         "rejected": rejected,
         "completed": completed,
         "failed": failed,
+        "execution_failures": execution_failures,
         "p50_queue_wait_ms": nearest_rank(queue_waits, 0.50),
         "p95_queue_wait_ms": p95_queue_wait_ms,
         "max_queue_wait_ms": max_queue_wait_ms,
@@ -170,7 +186,7 @@ def _timing_rows(dsn: str, jobs: Sequence[SubmittedJob]) -> list[dict[str, Any]]
     job_ids = [UUID(job.job_id) for job in jobs]
     with psycopg.connect(dsn, row_factory=dict_row) as connection:
         rows = connection.execute(
-            "SELECT id, status, "
+            "SELECT id, status, result, "
             "round(extract(epoch FROM (claimed_at - created_at)) * 1000)::bigint "
             "AS queue_wait_ms, "
             "round(extract(epoch FROM (completed_at - claimed_at)) * 1000)::bigint "
@@ -231,6 +247,11 @@ def run_scenario(
         else:
             jobs.append(SubmittedJob(queued["job_id"], user_id, slug))
 
+    # Include enqueue latency, but exclude the subsequent completion wait.
+    actual_arrival_window_seconds = time.monotonic() - start
+    arrival_window_met = (
+        actual_arrival_window_seconds <= scenario.arrival_window_seconds
+    )
     _wait_for_terminal_jobs(
         adapter,
         jobs,
@@ -252,6 +273,9 @@ def run_scenario(
     summary["description"] = scenario.description
     summary["synthetic_user_prefix"] = prefix
     summary["arrival_window_seconds"] = scenario.arrival_window_seconds
+    summary["actual_arrival_window_seconds"] = actual_arrival_window_seconds
+    summary["arrival_window_met"] = arrival_window_met
+    summary["passed"] = summary["passed"] and arrival_window_met
     summary["arrivals_per_minute"] = round(
         scenario.active_learners / scenario.arrival_window_seconds * 60,
         2,

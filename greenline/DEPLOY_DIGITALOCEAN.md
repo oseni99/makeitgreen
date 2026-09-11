@@ -81,6 +81,15 @@ probe has zero admission rejections, zero lost/infrastructure-failed jobs, every
 job reaches a terminal state, the queue SLO passes, and host monitoring shows no
 OOM or swap pressure.
 
+The JSON separates terminal job failures (`failed`) from completed jobs with
+unusable execution results (`execution_failures`). Only exit codes 0 and 1
+count as finished test runs; timeouts, killed containers, runner errors, and
+missing results fail the gate. `arrival_window_seconds` and
+`arrivals_per_minute` describe the requested workload;
+`actual_arrival_window_seconds` measures through the final enqueue response.
+`arrival_window_met` must be true, so slow submissions cannot silently turn a
+burst into a lighter workload. Completion polling is excluded from this window.
+
 ## Deployment shape
 
 ```mermaid
