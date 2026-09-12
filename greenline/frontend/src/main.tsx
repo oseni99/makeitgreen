@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import '@fontsource-variable/inter'
+import './monacoSetup'
 import { ClerkProvider } from '@clerk/react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
