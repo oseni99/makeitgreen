@@ -58,8 +58,8 @@ services:
 
 secrets:
   worker_database_url:
-    file: ${SECRETS_DIR:-./secrets}/worker_database_url
+    file: ./secrets/worker_database_url
   security_log_hmac_key:
-    file: ${SECRETS_DIR:-./secrets}/security_log_hmac_key
+    file: ./secrets/security_log_hmac_key
   postgres_ca:
-    file: ${SECRETS_DIR:-./secrets}/postgres_ca.crt
+    file: ./secrets/postgres_ca.crt

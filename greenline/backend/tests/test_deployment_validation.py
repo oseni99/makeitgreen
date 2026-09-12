@@ -78,6 +78,14 @@ def test_safe_two_host_settings_pass() -> None:
             "private VPC",
         ),
         (
+            lambda values: values[1].update({"POSTGRES_BIND_IP": "169.254.1.1"}),
+            "RFC1918",
+        ),
+        (
+            lambda values: values[1].update({"POSTGRES_BIND_IP": "192.0.2.1"}),
+            "RFC1918",
+        ),
+        (
             lambda values: values[3].update({"MAX_ACTIVE_RUNS": "99"}),
             "must match",
         ),
@@ -142,7 +150,7 @@ def test_worker_model_rejects_a_clerk_secret() -> None:
                 "networks": {"database": {}},
             },
         },
-        "networks": {"proxy": {}, "database": {"internal": True}},
+        "networks": {"proxy": {}, "database": {}},
     }
     worker = {
         "services": {
@@ -176,13 +184,17 @@ def test_worker_model_rejects_a_clerk_secret() -> None:
         deployment.validate_compose_models(app, worker)
 
 
-@pytest.mark.skipif(shutil.which("docker") is None, reason="Docker Compose unavailable")
-def test_checked_in_compose_models_render_with_safe_boundaries(tmp_path: Path) -> None:
+@pytest.fixture
+def prepared_deployment(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker Compose unavailable")
     app_root = tmp_path / "app"
     worker_root = tmp_path / "worker"
     shutil.copytree(ROOT / "deploy" / "app", app_root)
     shutil.copytree(ROOT / "deploy" / "worker", worker_root)
     app_release, app_runtime, worker_release, worker_runtime = _settings()
+    for key in {*app_release, *app_runtime, *worker_release, *worker_runtime}:
+        monkeypatch.delenv(key, raising=False)
     for path, values in (
         (app_root / "release.env", app_release),
         (app_root / "runtime.env", app_runtime),
@@ -194,4 +206,75 @@ def test_checked_in_compose_models_render_with_safe_boundaries(tmp_path: Path) -
             encoding="utf-8",
         )
 
-    deployment.validate(app_root, worker_root, check_secrets=False)
+    return app_root, worker_root
+
+
+def test_checked_in_compose_models_render_with_safe_boundaries(prepared_deployment) -> None:
+    deployment.validate(*prepared_deployment, check_secrets=False)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("POSTGRES_BIND_IP", "0.0.0.0", "private VPC"),
+        ("POSTGRES_BIND_IP", "8.8.8.8", "private VPC"),
+        ("POSTGRES_BIND_IP", "169.254.1.1", "RFC1918"),
+        ("POSTGRES_BIND_IP", "192.0.2.1", "RFC1918"),
+        ("POSTGRES_BIND_IP", "fd00::1", "RFC1918"),
+        ("CONTROL_PLANE_IMAGE", "registry.example/control:latest", "exact @sha256"),
+        ("CADDY_IMAGE", "caddy:latest", "exact @sha256"),
+        ("POSTGRES_IMAGE", "postgres:latest", "exact @sha256"),
+        ("EXECUTION_WORKER_IMAGE", "registry.example/worker:latest", "exact @sha256"),
+        ("PYTHON_EXECUTION_IMAGE", "registry.example/python:latest", "exact @sha256"),
+        ("NODE_EXECUTION_IMAGE", "registry.example/node:latest", "exact @sha256"),
+        ("WORKER_CONCURRENCY", "33", "1..32"),
+        ("MAX_ACTIVE_RUNS", "0", ">= 1"),
+    ],
+)
+def test_unsafe_shell_overrides_are_rejected(prepared_deployment, monkeypatch, key, value, message):
+    monkeypatch.setenv(key, value)
+    with pytest.raises(deployment.DeploymentValidationError, match=message):
+        deployment.validate(*prepared_deployment, check_secrets=False)
+
+
+def test_effective_policy_must_match_between_hosts(prepared_deployment):
+    _, worker_root = prepared_deployment
+    compose = worker_root / "compose.worker.yaml"
+    compose.write_text(compose.read_text().replace(
+        "GREENLINE_MAX_ACTIVE_RUNS: ${MAX_ACTIVE_RUNS:?set MAX_ACTIVE_RUNS}",
+        "GREENLINE_MAX_ACTIVE_RUNS: 99",
+    ))
+    with pytest.raises(deployment.DeploymentValidationError, match="must match"):
+        deployment.validate(*prepared_deployment, check_secrets=False)
+
+
+def test_shell_cannot_redirect_effective_secret_files(
+    prepared_deployment, monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SECRETS_DIR", str(tmp_path / "unvalidated-secrets"))
+
+    deployment.validate(*prepared_deployment, check_secrets=False)
+
+
+def test_changed_secret_source_is_rejected(prepared_deployment, tmp_path: Path) -> None:
+    app_root, _ = prepared_deployment
+    compose = app_root / "compose.app.yaml"
+    compose.write_text(
+        compose.read_text().replace(
+            "file: ./secrets/clerk_secret_key",
+            f"file: {tmp_path}/unvalidated-clerk-secret",
+        )
+    )
+
+    with pytest.raises(deployment.DeploymentValidationError, match="fixed deployment-relative"):
+        deployment.validate(*prepared_deployment, check_secrets=False)
+
+
+def test_database_network_must_support_cross_host_workers(prepared_deployment):
+    app_root, _ = prepared_deployment
+    compose = app_root / "compose.app.yaml"
+    compose.write_text(compose.read_text().replace(
+        "  database:\n    driver: bridge", "  database:\n    internal: true\n    driver: bridge"
+    ))
+    with pytest.raises(deployment.DeploymentValidationError, match="published private VPC port"):
+        deployment.validate(*prepared_deployment, check_secrets=False)

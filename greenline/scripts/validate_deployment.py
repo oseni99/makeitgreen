@@ -37,6 +37,24 @@ POLICY_KEYS = (
 EXPECTED_APP_SERVICES = {"caddy", "control-plane", "postgres"}
 EXPECTED_WORKER_SERVICES = {"execution-worker"}
 RUN_BUNDLE_PATH = "/srv/makeitgreen/run-bundles"
+RFC1918_NETWORKS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+APP_SECRET_FILES = {
+    "clerk_secret_key": "clerk_secret_key",
+    "api_database_url": "api_database_url",
+    "security_log_hmac_key": "security_log_hmac_key",
+    "postgres_admin_password": "postgres_admin_password",
+    "postgres_server_cert": "postgres_server.crt",
+    "postgres_server_key": "postgres_server.key",
+    "postgres_ca": "postgres_ca.crt",
+}
+WORKER_SECRET_FILES = {
+    "worker_database_url": "worker_database_url",
+    "security_log_hmac_key": "security_log_hmac_key",
+    "postgres_ca": "postgres_ca.crt",
+}
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -127,9 +145,11 @@ def validate_settings(
         )
     except ValueError as exc:
         raise DeploymentValidationError("POSTGRES_BIND_IP must be an IP address") from exc
-    if not postgres_ip.is_private or postgres_ip.is_loopback or postgres_ip.is_unspecified:
+    if postgres_ip.version != 4 or not any(
+        postgres_ip in network for network in RFC1918_NETWORKS
+    ):
         raise DeploymentValidationError(
-            "POSTGRES_BIND_IP must be a non-loopback private VPC address"
+            "POSTGRES_BIND_IP must be an IPv4 RFC1918 private VPC address"
         )
 
     try:
@@ -290,6 +310,26 @@ def _secret_sources(service: dict[str, object]) -> set[str]:
     }
 
 
+def validate_effective_secret_files(
+    model: dict[str, object], root: Path, expected: dict[str, str]
+) -> None:
+    """Require every rendered secret mount to stay under this deployment root."""
+    secrets = model.get("secrets")
+    if not isinstance(secrets, dict) or set(secrets) != set(expected):
+        raise DeploymentValidationError("deployment has an incorrect secret file set")
+    for secret_name, file_name in expected.items():
+        configuration = secrets[secret_name]
+        if not isinstance(configuration, dict):
+            raise DeploymentValidationError("deployment has an invalid secret source")
+        rendered_file = configuration.get("file")
+        if not isinstance(rendered_file, str) or Path(rendered_file).resolve() != (
+            root / "secrets" / file_name
+        ).resolve():
+            raise DeploymentValidationError(
+                f"{secret_name} must use its fixed deployment-relative secret file"
+            )
+
+
 def validate_compose_models(app: dict[str, object], worker: dict[str, object]) -> None:
     app_services = app.get("services")
     worker_services = worker.get("services")
@@ -344,8 +384,10 @@ def validate_compose_models(app: dict[str, object], worker: dict[str, object]) -
     database_network = (
         app_networks.get("database", {}) if isinstance(app_networks, dict) else {}
     )
-    if not isinstance(database_network, dict) or not database_network.get("internal"):
-        raise DeploymentValidationError("database network must be internal")
+    if not isinstance(database_network, dict) or database_network.get("internal"):
+        raise DeploymentValidationError(
+            "database network must allow the published private VPC port"
+        )
 
     execution_worker = worker_services["execution-worker"]
     if not isinstance(execution_worker, dict):
@@ -365,6 +407,47 @@ def validate_compose_models(app: dict[str, object], worker: dict[str, object]) -
     worker_secrets = _secret_sources(execution_worker)
     if worker_secrets != {"worker_database_url", "security_log_hmac_key", "postgres_ca"}:
         raise DeploymentValidationError("execution-worker has an incorrect secret boundary")
+
+    # Compose interpolates shell variables ahead of env files. Validate the
+    # settings containers will actually receive, not just their input files.
+    control_env = control.get("environment", {})
+    worker_env = execution_worker.get("environment", {})
+    caddy_env = app_services["caddy"].get("environment", {})
+    proxy_network = app_networks.get("proxy", {})
+    proxy_configs = proxy_network.get("ipam", {}).get("config", [])
+    docker_groups = execution_worker.get("group_add", [])
+    if (
+        not all(isinstance(env, dict) for env in (control_env, worker_env, caddy_env))
+        or len(proxy_configs) != 1
+        or len(docker_groups) != 1
+    ):
+        raise DeploymentValidationError("invalid effective Compose settings")
+    validate_settings(
+        {
+            "CONTROL_PLANE_IMAGE": control.get("image", ""),
+            "CADDY_IMAGE": app_services["caddy"].get("image", ""),
+            "POSTGRES_IMAGE": postgres.get("image", ""),
+        },
+        {
+            "APP_DOMAIN": caddy_env.get("APP_DOMAIN", ""),
+            "CLERK_AUTHORIZED_PARTIES": control_env.get("CLERK_AUTHORIZED_PARTIES", ""),
+            "POSTGRES_BIND_IP": postgres_port["host_ip"],
+            "PROXY_SUBNET": proxy_configs[0].get("subnet", ""),
+            **{key: control_env.get(f"GREENLINE_{key}", "") for key in POLICY_KEYS},
+        },
+        {
+            "EXECUTION_WORKER_IMAGE": execution_worker.get("image", ""),
+            "PYTHON_EXECUTION_IMAGE": worker_env.get("GREENLINE_PYTHON_EXECUTION_IMAGE", ""),
+            "NODE_EXECUTION_IMAGE": worker_env.get("GREENLINE_NODE_EXECUTION_IMAGE", ""),
+        },
+        {
+            "DOCKER_GID": str(docker_groups[0]),
+            **{
+                key: worker_env.get(f"GREENLINE_{key}", "")
+                for key in (*POLICY_KEYS, "RUN_MEMORY_MIB", "WORKER_CONCURRENCY", "RUN_BUNDLE_DIR")
+            },
+        },
+    )
 
 
 def validate_caddyfile(path: Path) -> None:
@@ -390,10 +473,11 @@ def validate(app_root: Path, worker_root: Path, *, check_secrets: bool = True) -
     if check_secrets:
         validate_secrets(app_root, worker_root)
     validate_caddyfile(app_root / "Caddyfile")
-    validate_compose_models(
-        _compose_model(app_root, "compose.app.yaml"),
-        _compose_model(worker_root, "compose.worker.yaml"),
-    )
+    app_model = _compose_model(app_root, "compose.app.yaml")
+    worker_model = _compose_model(worker_root, "compose.worker.yaml")
+    validate_effective_secret_files(app_model, app_root, APP_SECRET_FILES)
+    validate_effective_secret_files(worker_model, worker_root, WORKER_SECRET_FILES)
+    validate_compose_models(app_model, worker_model)
 
 
 def main() -> int:

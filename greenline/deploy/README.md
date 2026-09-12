@@ -39,6 +39,16 @@ Worker host:
 └── run-bundles/
 ```
 
+On the worker host, provision Run Bundle storage for the worker's numeric UID
+before starting it:
+
+```bash
+sudo install -d -o 65532 -g 65532 -m 0700 /srv/makeitgreen/run-bundles
+```
+
+The bind mount preserves host ownership. A root-owned directory prevents the
+worker's storage readiness check from succeeding.
+
 Copy each `*.env.example` to the corresponding ignored `*.env` file. Take the
 four MakeItGreen image references from one successful GitHub release manifest;
 never mix commits or remove `@sha256:...`. The Caddy and PostgreSQL references
@@ -78,6 +88,9 @@ The PostgreSQL server certificate must be valid for `postgres` and the app
 Droplet's private VPC address. Never put the schema-owner URL in either runtime
 secret.
 
+Secret locations are deliberately fixed under each deployment's `./secrets`
+directory. They cannot be relocated through shell or env-file interpolation.
+
 Compose file secrets are bind mounts. On the application host, make API files
 owned by UID/GID `65532:65532` and the PostgreSQL password/key/cert files owned
 by the numeric `postgres` user/group from the pinned image. On the worker host,
@@ -96,7 +109,8 @@ python scripts/validate_deployment.py \
   --worker-root /path/to/worker
 ```
 
-It rejects mutable image tags, inconsistent admission limits, a public
+It checks both the env files and the effective rendered Compose settings,
+including shell environment overrides. It rejects mutable image tags, inconsistent admission limits, a public
 PostgreSQL bind, a mismatched Run Bundle mount, leaked Clerk credentials, or a
 Docker socket on the application host. It also renders both Compose models via
 `docker compose config`.
@@ -141,5 +155,7 @@ the immutable execution images, and the release contract. Finally rerun
 The PostgreSQL port is bound only to `POSTGRES_BIND_IP`. Keep the DigitalOcean
 Cloud Firewall rule limited to tagged worker Droplets even though `pg_hba.conf`
 also rejects every non-TLS connection. Inside the application deployment,
-PostgreSQL is isolated on a second internal network; only the Control Plane
-bridges the proxy and database networks.
+PostgreSQL uses a separate bridge network; only the Control Plane
+joins both the proxy and database networks. The database network must allow
+external connectivity so Docker can publish PostgreSQL's private-IP port for
+the worker hosts. The private bind, TLS, and Cloud Firewall enforce that boundary.

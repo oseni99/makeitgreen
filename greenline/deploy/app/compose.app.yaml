@@ -162,19 +162,19 @@ services:
 
 secrets:
   clerk_secret_key:
-    file: ${SECRETS_DIR:-./secrets}/clerk_secret_key
+    file: ./secrets/clerk_secret_key
   api_database_url:
-    file: ${SECRETS_DIR:-./secrets}/api_database_url
+    file: ./secrets/api_database_url
   security_log_hmac_key:
-    file: ${SECRETS_DIR:-./secrets}/security_log_hmac_key
+    file: ./secrets/security_log_hmac_key
   postgres_admin_password:
-    file: ${SECRETS_DIR:-./secrets}/postgres_admin_password
+    file: ./secrets/postgres_admin_password
   postgres_server_cert:
-    file: ${SECRETS_DIR:-./secrets}/postgres_server.crt
+    file: ./secrets/postgres_server.crt
   postgres_server_key:
-    file: ${SECRETS_DIR:-./secrets}/postgres_server.key
+    file: ./secrets/postgres_server.key
   postgres_ca:
-    file: ${SECRETS_DIR:-./secrets}/postgres_ca.crt
+    file: ./secrets/postgres_ca.crt
 
 networks:
   proxy:
@@ -184,7 +184,8 @@ networks:
         - subnet: ${PROXY_SUBNET:-172.30.0.0/24}
   database:
     driver: bridge
-    internal: true
+    # Worker hosts reach PostgreSQL through its private-IP published port.
+    # An internal network would prevent Docker from publishing that port.
     ipam:
       config:
         - subnet: 172.31.0.0/24
