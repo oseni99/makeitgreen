@@ -5,6 +5,9 @@ FROM ${NODE_BASE_IMAGE}
 ARG NODE_BASE_IMAGE
 ARG SOURCE_URL
 ARG SOURCE_REVISION
+RUN apt-get update && \
+    apt-get install --only-upgrade --yes libpcre2-8-0 && \
+    rm -rf /var/lib/apt/lists/*
 LABEL org.opencontainers.image.source=${SOURCE_URL} \
     org.opencontainers.image.revision=${SOURCE_REVISION}
 RUN digest="${NODE_BASE_IMAGE##*@sha256:}"; \

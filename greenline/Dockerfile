@@ -32,6 +32,9 @@ RUN /opt/greenline-venv/bin/pip install --requirement /tmp/requirements-producti
 FROM ${PYTHON_BASE} AS control-plane
 ARG SOURCE_URL
 ARG SOURCE_REVISION
+RUN apt-get update && \
+    apt-get install --only-upgrade --yes libpcre2-8-0 && \
+    rm -rf /var/lib/apt/lists/*
 LABEL org.opencontainers.image.source=${SOURCE_URL} \
     org.opencontainers.image.revision=${SOURCE_REVISION}
 ENV PATH=/opt/greenline-venv/bin:$PATH \
