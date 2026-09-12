@@ -151,6 +151,9 @@ compromise does not directly expose the Control Plane host or Clerk secret.
 - `/health/live`, `/health/ready`, and exact-version `/health/release` checks.
 - CI tests, vulnerability scanning, SBOMs, provenance, immutable GHCR
   publication, protected promotion, and automatic rollback.
+- Separate application and worker Compose manifests, a hardened Caddy edge,
+  PostgreSQL TLS policy, environment templates, and a fail-closed deployment
+  validator under [`deploy/`](deploy/).
 
 ### Already configured externally
 
@@ -162,9 +165,9 @@ compromise does not directly expose the Control Plane host or Clerk secret.
 
 ### Still needed before deployment
 
-- Review, commit, and push the threat model and deployment reconciliation.
-- Configure the GitHub `VITE_CLERK_PUBLISHABLE_KEY` repository variable.
-- Create separate application and worker Compose manifests plus the Caddyfile.
+- Review, commit, and push the deployment bundle.
+- Copy each host's files from [`deploy/`](deploy/), install its secrets, and run
+  [`scripts/validate_deployment.py`](scripts/validate_deployment.py).
 - Add and verify the final deployed application origin in Clerk, then confirm
   the frontend publishable key and backend secret belong to that same instance.
 - Provision both Droplets in one VPC, the DNS record, separate firewalls,
@@ -331,6 +334,12 @@ host's worker at the exact same absolute path visible to that host's Docker
 daemon. The Control Plane never mounts or shares this directory.
 
 ### Phase 8: configure production Compose
+
+Use the checked-in [`deploy/app/compose.app.yaml`](deploy/app/compose.app.yaml),
+[`deploy/worker/compose.worker.yaml`](deploy/worker/compose.worker.yaml), and
+[`deploy/app/Caddyfile`](deploy/app/Caddyfile). The exact copy, secret, validation,
+and startup sequence is in [`deploy/README.md`](deploy/README.md). Do not merge
+the two manifests onto one host.
 
 The application Compose deployment contains exactly three long-lived services:
 

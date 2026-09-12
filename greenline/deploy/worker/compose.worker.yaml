@@ -1,0 +1,65 @@
+name: makeitgreen-worker
+
+services:
+  execution-worker:
+    image: ${EXECUTION_WORKER_IMAGE:?set EXECUTION_WORKER_IMAGE from the release manifest}
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    group_add:
+      - ${DOCKER_GID:?set DOCKER_GID to the numeric group of /var/run/docker.sock}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 90s
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    environment:
+      GREENLINE_DATABASE_URL_FILE: /run/secrets/worker_database_url
+      GREENLINE_LOG_HMAC_KEY_FILE: /run/secrets/security_log_hmac_key
+      GREENLINE_PYTHON_EXECUTION_IMAGE: ${PYTHON_EXECUTION_IMAGE:?set PYTHON_EXECUTION_IMAGE from the release manifest}
+      GREENLINE_NODE_EXECUTION_IMAGE: ${NODE_EXECUTION_IMAGE:?set NODE_EXECUTION_IMAGE from the release manifest}
+      GREENLINE_RUN_BUNDLE_DIR: ${RUN_BUNDLE_DIR:-/srv/makeitgreen/run-bundles}
+      GREENLINE_RUN_MEMORY_MIB: ${RUN_MEMORY_MIB:-384}
+      GREENLINE_WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:?set WORKER_CONCURRENCY from measured capacity}
+      GREENLINE_MAX_ACTIVE_RUNS: ${MAX_ACTIVE_RUNS:?set MAX_ACTIVE_RUNS}
+      GREENLINE_MAX_ACTIVE_RUNS_PER_USER: ${MAX_ACTIVE_RUNS_PER_USER:-1}
+      GREENLINE_MAX_REQUEST_BYTES: ${MAX_REQUEST_BYTES:-262144}
+      GREENLINE_REQUESTS_PER_MINUTE: ${REQUESTS_PER_MINUTE:-240}
+      GREENLINE_MUTATIONS_PER_MINUTE: ${MUTATIONS_PER_MINUTE:-30}
+      GREENLINE_RUNS_PER_MINUTE: ${RUNS_PER_MINUTE:-6}
+      GREENLINE_CONTENT_READS_PER_MINUTE: ${CONTENT_READS_PER_MINUTE:-120}
+      GREENLINE_DISTINCT_CHALLENGES_PER_HOUR: ${DISTINCT_CHALLENGES_PER_HOUR:-20}
+      GREENLINE_SOLUTIONS_PER_HOUR: ${SOLUTIONS_PER_HOUR:-5}
+      GREENLINE_AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-30}
+    secrets:
+      - worker_database_url
+      - security_log_hmac_key
+      - postgres_ca
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: bind
+        source: ${RUN_BUNDLE_DIR:-/srv/makeitgreen/run-bundles}
+        target: ${RUN_BUNDLE_DIR:-/srv/makeitgreen/run-bundles}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import worker; runtime = worker.compose_worker(); runtime.close()
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 15s
+
+secrets:
+  worker_database_url:
+    file: ${SECRETS_DIR:-./secrets}/worker_database_url
+  security_log_hmac_key:
+    file: ${SECRETS_DIR:-./secrets}/security_log_hmac_key
+  postgres_ca:
+    file: ${SECRETS_DIR:-./secrets}/postgres_ca.crt

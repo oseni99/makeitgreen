@@ -28,6 +28,8 @@ deploy/**/secrets/
 deploy/**/logs/
 deploy/**/*.log
 deploy/**/*.jsonl
+deploy/**/release.env
+deploy/**/runtime.env
 backend/logs/
 backend/*.log
 backend/*.jsonl

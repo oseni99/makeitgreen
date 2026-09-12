@@ -288,8 +288,14 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   server request IDs, bounded fields, severity, and stable HMAC-pseudonymized learner
   subjects. They are emitted as one-line JSON for collection and alert rules without
   tokens, raw subjects, request bodies, file paths, or database URLs.
+- **Deployment bundle implemented:** separate application and execution-worker
+  Compose manifests, a Caddy edge, PostgreSQL TLS enforcement, digest-only release
+  settings, least-secret mounts, and a fail-closed preflight validator are checked in
+  under `deploy/`. The validator rejects a public database bind, mutable images,
+  mismatched shared policy, a Docker socket in the application trust zone, and Clerk
+  credentials in the worker trust zone.
 - **Remaining deployment gate:** do not expose the service to untrusted users yet.
-  The deployment platform must still provide secret delivery/rotation, direct-port
+  The live deployment must still provide secret delivery/rotation, direct-port
   network isolation, edge DDoS limits, a JSON-log collector with concrete alert rules,
   durable audit export, backup/restore drills, separate application/database and
   execution hosts, and measured capacity evidence.
@@ -300,9 +306,9 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   50/100-learner five-minute cohorts, a 100-submission/10-second peak burst, and a
   25-learner retry burst against a mixed Python/Node workload on the real PostgreSQL
   queue and worker pool.
-- **Suggested sequence:** create the separate Compose deployments, close the network and
-  secret gates, then capture backup/restore, adversarial execution, and capacity evidence
-  in gap 15.
+- **Suggested sequence:** install and validate the two Compose deployments, close the
+  live network and secret gates, then capture backup/restore, adversarial execution,
+  and capacity evidence in gap 15.
 
 ### 8. ~~Runs are synchronous and non-streaming~~ — CLOSED
 
@@ -455,8 +461,8 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   Production deployment-platform secret rotation, direct-port network isolation, an external log
   collector/alerts, durable audit export, backup/restore policy and drills, registry
   retention policy, the hosting platform's tag-watcher/deployment-controller
-  configuration, permanent external release-record export, separate production Compose
-  manifests, and real-host capacity evidence remain missing.
+  configuration, permanent external release-record export, live deployment evidence,
+  and real-host capacity evidence remain missing.
 - **Required deployment shape:** the web/API Control Plane may serve `frontend/dist`
   from one image on the stateful application/database host. Untrusted test execution
   must run on a separate execution host pool with no Clerk secret or public listener.

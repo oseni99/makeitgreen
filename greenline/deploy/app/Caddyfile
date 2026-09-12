@@ -1,0 +1,35 @@
+{
+	admin localhost:2019
+	log default {
+		output stdout
+		format json
+	}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	request_body {
+		max_size 256KB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://clerk.makeitgreen.dev https://challenges.cloudflare.com https://*.protect.clerk.com; connect-src 'self' https://clerk.makeitgreen.dev https://*.protect.clerk.com:*; img-src 'self' data: https://img.clerk.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; frame-src 'self' https://challenges.cloudflare.com https://*.protect.clerk.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+
+	reverse_proxy control-plane:8000 {
+		health_uri /health/live
+		health_interval 30s
+		health_timeout 3s
+	}
+}

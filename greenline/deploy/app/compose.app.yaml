@@ -1,0 +1,190 @@
+name: makeitgreen-app
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?set CADDY_IMAGE to an immutable digest reference}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    tmpfs:
+      - /config/caddy:mode=0700,size=16m
+      - /tmp:mode=1777,size=16m
+    ports:
+      - target: 80
+        published: "80"
+        protocol: tcp
+      - target: 443
+        published: "443"
+        protocol: tcp
+      - target: 443
+        published: "443"
+        protocol: udp
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: ./caddy-data
+        target: /data
+    networks:
+      proxy:
+        ipv4_address: 172.30.0.2
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  control-plane:
+    image: ${CONTROL_PLANE_IMAGE:?set CONTROL_PLANE_IMAGE from the release manifest}
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 90s
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    environment:
+      CLERK_SECRET_KEY_FILE: /run/secrets/clerk_secret_key
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:?set CLERK_AUTHORIZED_PARTIES}
+      GREENLINE_DATABASE_URL_FILE: /run/secrets/api_database_url
+      GREENLINE_LOG_HMAC_KEY_FILE: /run/secrets/security_log_hmac_key
+      GREENLINE_TRUSTED_PROXY_CIDRS: ${PROXY_SUBNET:-172.30.0.0/24}
+      GREENLINE_MAX_REQUEST_BYTES: ${MAX_REQUEST_BYTES:-262144}
+      GREENLINE_REQUESTS_PER_MINUTE: ${REQUESTS_PER_MINUTE:-240}
+      GREENLINE_MUTATIONS_PER_MINUTE: ${MUTATIONS_PER_MINUTE:-30}
+      GREENLINE_RUNS_PER_MINUTE: ${RUNS_PER_MINUTE:-6}
+      GREENLINE_CONTENT_READS_PER_MINUTE: ${CONTENT_READS_PER_MINUTE:-120}
+      GREENLINE_DISTINCT_CHALLENGES_PER_HOUR: ${DISTINCT_CHALLENGES_PER_HOUR:-20}
+      GREENLINE_SOLUTIONS_PER_HOUR: ${SOLUTIONS_PER_HOUR:-5}
+      GREENLINE_MAX_ACTIVE_RUNS: ${MAX_ACTIVE_RUNS:?set MAX_ACTIVE_RUNS}
+      GREENLINE_MAX_ACTIVE_RUNS_PER_USER: ${MAX_ACTIVE_RUNS_PER_USER:-1}
+      GREENLINE_AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-30}
+    secrets:
+      - clerk_secret_key
+      - api_database_url
+      - security_log_hmac_key
+      - postgres_ca
+    networks:
+      proxy:
+        ipv4_address: 172.30.0.10
+      database:
+        ipv4_address: 172.31.0.10
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?set POSTGRES_IMAGE to an immutable digest reference}
+    restart: unless-stopped
+    shm_size: 128m
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 90s
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-greenline}
+      POSTGRES_USER: ${POSTGRES_USER:-greenline_owner}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+    command:
+      - postgres
+      - -c
+      - listen_addresses=*
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/secrets/postgres_server_cert
+      - -c
+      - ssl_key_file=/run/secrets/postgres_server_key
+      - -c
+      - ssl_ca_file=/run/secrets/postgres_ca
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    secrets:
+      - postgres_admin_password
+      - postgres_server_cert
+      - postgres_server_key
+      - postgres_ca
+    volumes:
+      - type: bind
+        source: ./postgres-data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./postgres/pg_hba.conf
+        target: /etc/postgresql/pg_hba.conf
+        read_only: true
+    ports:
+      - target: 5432
+        published: "5432"
+        host_ip: ${POSTGRES_BIND_IP:?set POSTGRES_BIND_IP to the app Droplet private VPC address}
+        protocol: tcp
+    networks:
+      database:
+        ipv4_address: 172.31.0.20
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+secrets:
+  clerk_secret_key:
+    file: ${SECRETS_DIR:-./secrets}/clerk_secret_key
+  api_database_url:
+    file: ${SECRETS_DIR:-./secrets}/api_database_url
+  security_log_hmac_key:
+    file: ${SECRETS_DIR:-./secrets}/security_log_hmac_key
+  postgres_admin_password:
+    file: ${SECRETS_DIR:-./secrets}/postgres_admin_password
+  postgres_server_cert:
+    file: ${SECRETS_DIR:-./secrets}/postgres_server.crt
+  postgres_server_key:
+    file: ${SECRETS_DIR:-./secrets}/postgres_server.key
+  postgres_ca:
+    file: ${SECRETS_DIR:-./secrets}/postgres_ca.crt
+
+networks:
+  proxy:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.30.0.0/24}
+  database:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
