@@ -5,6 +5,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { WorkspaceRoute } from '../src/pages/KeyedRoutes'
+import { formatRunFailureOutput } from '../src/runFailure'
 import viteConfig from '../vite.config'
 
 const editorHarness = vi.hoisted(() => ({
@@ -221,6 +222,20 @@ afterEach(() => {
 })
 
 describe('workspace reliability', () => {
+  it('preserves streamed output and gives hosted recovery guidance', () => {
+    const output = formatRunFailureOutput(
+      'challenge execution failed',
+      'collecting tests...\n5 passed, 13 failed',
+      true,
+    )
+
+    expect(output).toContain('collecting tests...')
+    expect(output).toContain('challenge execution failed')
+    expect(output).toContain('Your code is saved')
+    expect(output).not.toContain('localhost')
+    expect(output).not.toContain('127.0.0.1')
+  })
+
   it('binds the proxied development server only to IPv4 loopback', () => {
     expect(typeof viteConfig).toBe('object')
     expect(viteConfig.server?.host).toBe('127.0.0.1')

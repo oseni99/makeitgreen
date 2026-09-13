@@ -13,6 +13,7 @@ import {
 } from '../api'
 import { LoadError } from '../components/LoadError'
 import { defineGreenlineTheme } from '../monacoTheme'
+import { formatRunFailureOutput } from '../runFailure'
 import {
   revealEditorLocation,
   selectInitialEditableFile,
@@ -719,13 +720,13 @@ export default function Workspace() {
     setRunning(true)
     setOutputOpen(true)
     setDrawerTab('results')
+    let streamedOutput = ''
     try {
       await saveAll()
       if (restoreInProgressRef.current) return
       const sessionMs = timer && timer.status !== 'idle' ? elapsedMs(timer) : undefined
       const job = await api.startRun(slug, sessionMs)
       let offset = 0
-      let streamedOutput = ''
       let streamTruncated = false
       let r: RunResult | undefined
       while (!r) {
@@ -779,7 +780,7 @@ export default function Workspace() {
       setResult({
         exit_code: -1,
         green: false,
-        output: `Run failed before pytest finished.\n\n${message}\n\nCheck that uvicorn is running on http://127.0.0.1:8000 and that you opened the app via http://localhost:5173 (Vite proxies /api there).`,
+        output: formatRunFailureOutput(message, streamedOutput),
         output_truncated: false,
         tests: [],
         passed: 0,

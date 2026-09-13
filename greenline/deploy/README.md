@@ -21,6 +21,7 @@ Application host:
 ├── compose.app.yaml
 ├── Caddyfile
 ├── postgres/pg_hba.conf
+├── postgres/runtime-role-grants.sql
 ├── release.env
 ├── runtime.env
 ├── secrets/
@@ -126,9 +127,19 @@ docker compose --env-file release.env --env-file runtime.env \
   -f compose.app.yaml up -d postgres
 ```
 
-Apply migrations `001` through `007` with the schema owner, create the separate
-runtime roles, and write the final runtime URLs before starting the Control
-Plane and Caddy. Then:
+Apply migrations `001` through `007` with the schema owner and create the
+separate runtime roles. Then apply the checked-in runtime grants as the schema
+owner. The conflict-key column grant is required by the worker's
+`INSERT ... ON CONFLICT` product-event write:
+
+```bash
+docker exec -i makeitgreen-app-postgres-1 sh -c \
+  'PGPASSWORD="$(cat /run/secrets/postgres_admin_password)" exec psql \
+  -h 127.0.0.1 -U greenline_owner -d greenline -v ON_ERROR_STOP=1' \
+  < postgres/runtime-role-grants.sql
+```
+
+Write the final runtime URLs before starting the Control Plane and Caddy. Then:
 
 ```bash
 docker compose --env-file release.env --env-file runtime.env \

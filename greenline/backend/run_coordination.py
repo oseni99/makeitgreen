@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from contextlib import contextmanager
@@ -15,6 +16,8 @@ import learner_state
 import progress
 import runner
 
+
+LOGGER = logging.getLogger(__name__)
 
 OUTPUT_LIMIT = 20_000
 CLAIM_SECONDS = 30
@@ -689,6 +692,14 @@ class RunJobWorker:
         except StaleRunJobClaim:
             return
         except Exception:
+            LOGGER.exception(
+                "Run Job execution failed",
+                extra={
+                    "job_id": str(claim.job_id),
+                    "challenge_slug": claim.slug,
+                    "worker_id": claim.worker_id,
+                },
+            )
             try:
                 self._jobs.fail(claim, "challenge execution failed")
             except (StaleRunJobClaim, RunJobsUnavailable):

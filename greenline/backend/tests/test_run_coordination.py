@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -87,6 +88,13 @@ class _RecordingExecution:
         }
 
 
+class _FailingExecution:
+    def execute(self, request, on_output=None):
+        if on_output is not None:
+            on_output("pytest began\n")
+        raise RuntimeError("internal execution detail")
+
+
 def test_worker_executes_the_enqueued_snapshot_and_publishes_the_result() -> None:
     jobs = _OneJobAdapter()
     execution = _RecordingExecution()
@@ -108,6 +116,30 @@ def test_worker_executes_the_enqueued_snapshot_and_publishes_the_result() -> Non
     assert jobs.output == "one test passed\n"
     assert jobs.result is not None and jobs.result["green"] is True
     assert jobs.failed is None
+
+
+def test_worker_logs_internal_failures_without_exposing_them_to_the_job(caplog) -> None:
+    jobs = _OneJobAdapter()
+    worker = run_coordination.RunJobWorker(
+        jobs,
+        _SnapshotState(),
+        _FailingExecution(),
+        workers=1,
+        poll_interval=0.01,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="run_coordination"):
+        worker.start()
+        try:
+            assert jobs.finished.wait(timeout=2)
+        finally:
+            worker.stop()
+
+    assert jobs.output == "pytest began\n"
+    assert jobs.failed == "challenge execution failed"
+    assert "internal execution detail" not in jobs.failed
+    assert "Run Job execution failed" in caplog.text
+    assert "internal execution detail" in caplog.text
 
 
 class _ManyJobsAdapter:

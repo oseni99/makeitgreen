@@ -66,6 +66,18 @@ def test_safe_two_host_settings_pass() -> None:
     deployment.validate_settings(*_settings())
 
 
+def test_runtime_grants_allow_worker_product_event_conflict_detection() -> None:
+    grants = (
+        ROOT / "deploy" / "app" / "postgres" / "runtime-role-grants.sql"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(grants.split())
+
+    assert (
+        "GRANT SELECT (user_id, dedupe_key) ON product_events TO greenline_worker;"
+        in normalized
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
