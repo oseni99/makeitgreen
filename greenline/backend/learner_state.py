@@ -75,9 +75,6 @@ class LearnerStateAdapter(Protocol):
     def write_file(self, slug: str, path: str, content: str, user_id: str | None) -> None: ...
     def create_file(self, slug: str, path: str, content: str, user_id: str | None) -> None: ...
     def delete_file(self, slug: str, path: str, user_id: str | None) -> None: ...
-    def search_files(
-        self, slug: str, query: str, limit: int, user_id: str | None
-    ) -> list[dict[str, Any]]: ...
     def snapshot(self, slug: str, user_id: str | None) -> WorkspaceSnapshot: ...
     def record_run(self, slug: str, user_id: str | None, **values: Any) -> dict[str, Any]: ...
     def list_runs(self, slug: str, limit: int, user_id: str | None) -> list[dict[str, Any]]: ...
@@ -121,11 +118,6 @@ class LocalLearnerStateAdapter:
 
     def delete_file(self, slug: str, path: str, user_id: str | None) -> None:
         challenges.delete_file(slug, path, user_id)
-
-    def search_files(
-        self, slug: str, query: str, limit: int, user_id: str | None
-    ) -> list[dict[str, Any]]:
-        return challenges.search_files(slug, query, limit=limit, user_id=user_id)
 
     def snapshot(self, slug: str, user_id: str | None) -> WorkspaceSnapshot:
         files = {
@@ -469,27 +461,6 @@ class PostgresLearnerStateAdapter:
                 "updated_at = now() WHERE user_id = %s AND slug = %s",
                 (user, slug),
             )
-
-    def search_files(
-        self, slug: str, query: str, limit: int, user_id: str | None
-    ) -> list[dict[str, Any]]:
-        needle = query.strip().lower()
-        if not needle:
-            return []
-        if len(needle) > 200:
-            raise challenges.InvalidPath("query too long")
-        bounded_limit = max(1, min(int(limit), 200))
-        hits: list[dict[str, Any]] = []
-        for entry in self.file_tree(slug, user_id):
-            text = self.read_file(slug, entry["path"], user_id)
-            for line_number, line in enumerate(text.splitlines(), start=1):
-                if needle in line.lower():
-                    hits.append(
-                        {"path": entry["path"], "line": line_number, "text": line[:240]}
-                    )
-                    if len(hits) >= bounded_limit:
-                        return hits
-        return hits
 
     def snapshot(self, slug: str, user_id: str | None) -> WorkspaceSnapshot:
         self._user(user_id)

@@ -1117,20 +1117,6 @@ def reset(slug: str, request: Request = None) -> dict:  # type: ignore[assignmen
     return {"ok": True}
 
 
-@router.get("/api/challenges/{slug}/search")
-def search(slug: str, q: str = "", limit: int = 100, request: Request = None) -> dict:  # type: ignore[assignment]
-    try:
-        ch.load(slug)
-        hits = request_learner_state(request).search_files(
-            slug, q, limit, request_user_id(request)
-        )
-    except ch.ChallengeNotFound:
-        raise HTTPException(404, "challenge not found")
-    except ch.InvalidPath:
-        raise HTTPException(400, "invalid query")
-    return {"query": q, "hits": hits}
-
-
 @router.post("/api/challenges/{slug}/spoil")
 def spoil(slug: str, request: Request = None) -> dict:  # type: ignore[assignment]
     with challenge_operation(slug):

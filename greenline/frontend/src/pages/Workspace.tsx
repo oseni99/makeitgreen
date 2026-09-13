@@ -9,7 +9,6 @@ import {
   type RunHistoryEntry,
   type RunMeta,
   type RunResult,
-  type SearchHit,
 } from '../api'
 import { LoadError } from '../components/LoadError'
 import { defineGreenlineTheme } from '../monacoTheme'
@@ -346,7 +345,7 @@ export default function Workspace() {
   const navigate = useNavigate()
   const [challenge, setChallenge] = useState<ChallengeDetail | null>(null)
   const [loadError, setLoadError] = useState(false)
-  const [sideTab, setSideTab] = useState<'brief' | 'files' | 'search'>('brief')
+  const [sideTab, setSideTab] = useState<'brief' | 'files'>('brief')
   const [openPath, setOpenPath] = useState<string>('')
   const [openTabs, setOpenTabs] = useState<string[]>([])
   const [contents, setContents] = useState<Record<string, string>>({})
@@ -366,9 +365,6 @@ export default function Workspace() {
   const [restoreError, setRestoreError] = useState('')
   const [newPath, setNewPath] = useState('')
   const [fileOpError, setFileOpError] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchHits, setSearchHits] = useState<SearchHit[]>([])
-  const [searching, setSearching] = useState(false)
   /** Narrow viewports: side panel toggled; desktop CSS ignores this. */
   const [mobileSideOpen, setMobileSideOpen] = useState(false)
   const contentsRef = useRef(contents)
@@ -379,7 +375,6 @@ export default function Workspace() {
   const monacoRef = useRef<Monaco | null>(null)
   const modelListenerRef = useRef<{ dispose: () => void } | null>(null)
   const pendingRevealRef = useRef<{ path: string; line: number } | null>(null)
-  const searchRequestRef = useRef(0)
   const saveCurrentRef = useRef<() => Promise<void>>(async () => {})
   const pendingSavesRef = useRef(new Set<Promise<unknown>>())
   const restoreInProgressRef = useRef(false)
@@ -433,17 +428,6 @@ export default function Workspace() {
     else blocker.reset()
   }, [blocker])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        setSideTab('search')
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   const revealPending = useCallback(() => {
     const pending = pendingRevealRef.current
     const editor = editorRef.current
@@ -475,7 +459,7 @@ export default function Workspace() {
       }
       setOpenPath(path)
       setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]))
-      setSideTab((tab) => (tab === 'search' ? tab : 'files'))
+      setSideTab('files')
       // On narrow layouts, opening a file should reveal the editor.
       setMobileSideOpen(false)
       return true
@@ -664,27 +648,6 @@ export default function Workspace() {
     saveCurrentRef.current = saveCurrent
   })
 
-  async function runSearch(e?: React.FormEvent) {
-    e?.preventDefault()
-    const q = searchQuery.trim()
-    const requestId = ++searchRequestRef.current
-    if (!q) {
-      setSearchHits([])
-      setSearching(false)
-      return
-    }
-    setSearching(true)
-    try {
-      const hits = await api.search(slug, q)
-      if (requestId === searchRequestRef.current) setSearchHits(hits)
-    } catch (err) {
-      console.error(err)
-      if (requestId === searchRequestRef.current) setSearchHits([])
-    } finally {
-      if (requestId === searchRequestRef.current) setSearching(false)
-    }
-  }
-
   const onEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
     monacoRef.current = monaco
@@ -849,7 +812,6 @@ export default function Workspace() {
     setSelectedRunId(null)
     setRestoringRunId(null)
     setRestoreError('')
-    setSearchHits([])
     setTimer(clearTimer(slug, challenge?.minutes ?? timer?.durationMinutes ?? 25))
     await load()
   }
@@ -896,7 +858,6 @@ export default function Workspace() {
       setDirty(new Set())
       setOpenTabs([])
       setOpenPath('')
-      setSearchHits([])
 
       const detail = await api.getChallenge(slug)
       setChallenge(detail)
@@ -1085,7 +1046,7 @@ export default function Workspace() {
           )}
           id="ws-side-panel"
         >
-          <div className="grid h-11 shrink-0 grid-cols-3 border-b bg-muted/35 px-2" role="group" aria-label="Workspace panel">
+          <div className="grid h-11 shrink-0 grid-cols-2 border-b bg-muted/35 px-2" role="group" aria-label="Workspace panel">
             <button
               type="button"
               aria-pressed={sideTab === 'brief'}
@@ -1108,18 +1069,6 @@ export default function Workspace() {
             >
               Files
             </button>
-            <button
-              type="button"
-              aria-pressed={sideTab === 'search'}
-              className={cn(
-                'border-b-2 border-transparent px-2 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-                sideTab === 'search' && 'border-primary text-foreground',
-              )}
-              onClick={() => setSideTab('search')}
-              title="Search in challenge (⌘⇧F)"
-            >
-              Search
-            </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto bg-card">
             {sideTab === 'brief' ? (
@@ -1130,43 +1079,6 @@ export default function Workspace() {
                   <span className="rounded-full border px-2 py-1 text-[11px] text-muted-foreground">attempts: {challenge.progress.attempts}</span>
                 </div>
                 <ReactMarkdown>{challenge.brief}</ReactMarkdown>
-              </div>
-            ) : sideTab === 'search' ? (
-              <div className="p-3">
-                <form className="flex gap-2" onSubmit={(e) => void runSearch(e)}>
-                  <input
-                    className="min-h-10 min-w-0 flex-1 rounded-md border bg-background px-3 font-mono text-xs outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="search in files…"
-                    aria-label="search challenge files"
-                    autoFocus
-                  />
-                  <Button type="submit" variant="utility" size="sm" disabled={searching || !searchQuery.trim()}>
-                    {searching ? '…' : 'go'}
-                  </Button>
-                </form>
-                <div className="mt-3 grid gap-1">
-                  {searchHits.length === 0 ? (
-                    <span className="px-2 py-6 text-center text-xs text-muted-foreground">
-                      {searchQuery.trim() ? 'no matches' : 'type a query and press go'}
-                    </span>
-                  ) : (
-                    searchHits.map((h, i) => (
-                      <button
-                        key={`${h.path}:${h.line}:${i}`}
-                        type="button"
-                        className="grid w-full gap-0.5 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => jumpTo(h.path, h.line)}
-                      >
-                        <span className="truncate font-mono text-[11px] font-semibold text-primary">
-                          {h.path}:{h.line}
-                        </span>
-                        <span className="truncate font-mono text-xs text-muted-foreground">{h.text.trim()}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
               </div>
             ) : (
               <>

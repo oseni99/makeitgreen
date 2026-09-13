@@ -150,7 +150,7 @@ def classify_request(method: str, path: str) -> RequestClassification:
         and slug
         and (
             len(parts) == 3
-            or (len(parts) >= 4 and parts[3] in {"files", "search", "solution"})
+            or (len(parts) >= 4 and parts[3] in {"files", "solution"})
         )
     )
     if run:

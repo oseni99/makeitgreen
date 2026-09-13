@@ -442,36 +442,6 @@ def delete_file(slug: str, rel: str, user_id: str | None = None) -> None:
     ws_file.unlink()
 
 
-def search_files(slug: str, query: str, *, limit: int = 100, user_id: str | None = None) -> list[dict[str, Any]]:
-    """Case-insensitive substring search across challenge files (workspace overlays win)."""
-    q = query.strip()
-    if not q:
-        return []
-    if len(q) > 200:
-        raise InvalidPath("query too long")
-    limit = max(1, min(int(limit), 200))
-    needle = q.lower()
-    hits: list[dict[str, Any]] = []
-    for entry in file_tree(slug, user_id):
-        path = entry["path"]
-        try:
-            text = read_file(slug, path, user_id)
-        except (ChallengeNotFound, InvalidPath):
-            continue
-        for i, line in enumerate(text.splitlines(), start=1):
-            if needle in line.lower():
-                hits.append(
-                    {
-                        "path": path,
-                        "line": i,
-                        "text": line[:240],
-                    }
-                )
-                if len(hits) >= limit:
-                    return hits
-    return hits
-
-
 def reset_workspace(slug: str, user_id: str | None = None) -> None:
     import shutil
 

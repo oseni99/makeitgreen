@@ -169,15 +169,6 @@ def test_authenticated_workspace_operations_are_isolated_by_subject(
     assert client.get(
         "/api/challenges/demo/files/main.py", headers=_as("user_b")
     ).json()["content"] == "original\n"
-    assert len(
-        client.get(
-            "/api/challenges/demo/search?q=marker-a", headers=_as("user_a")
-        ).json()["hits"]
-    ) == 1
-    assert client.get(
-        "/api/challenges/demo/search?q=marker-a", headers=_as("user_b")
-    ).json()["hits"] == []
-
     client.put(
         "/api/challenges/demo/files/main.py",
         headers=_as("user_b"),

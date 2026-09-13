@@ -116,12 +116,6 @@ export interface Solution {
   files: SolutionFile[]
 }
 
-export interface SearchHit {
-  path: string
-  line: number
-  text: string
-}
-
 export type PrepPath = 'foundations' | 'distributed' | 'debugging' | 'senior'
 
 export interface LearnerPreferences {
@@ -247,10 +241,6 @@ export const api = {
       `/api/challenges/${slug}/runs/${runId}/restore`,
       { method: 'POST' },
     ),
-  search: (slug: string, q: string) =>
-    req<{ hits: SearchHit[] }>(
-      `/api/challenges/${slug}/search?q=${encodeURIComponent(q)}`,
-    ).then((d) => d.hits),
   reset: (slug: string) => req(`/api/challenges/${slug}/reset`, { method: 'POST' }),
   spoil: (slug: string) =>
     req<{ ok: true; progress: Progress }>(`/api/challenges/${slug}/spoil`, { method: 'POST' }),

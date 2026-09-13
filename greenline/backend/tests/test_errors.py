@@ -67,21 +67,6 @@ def test_non_utf8_repo_file_returns_deterministic_json_error(
     assert response.json() == {"detail": "challenge file is not valid UTF-8"}
 
 
-def test_search_non_utf8_repo_file_returns_deterministic_json_error(
-    isolated_challenges: Path,
-) -> None:
-    challenge = _create_challenge(isolated_challenges, "invalid-search-file")
-    (challenge / "repo" / "main.py").write_text("needle\n", encoding="utf-8")
-    (challenge / "repo" / "broken.py").write_bytes(b"needle\n\xff")
-
-    response = TestClient(api.app, raise_server_exceptions=False).get(
-        "/api/challenges/invalid-search-file/search", params={"q": "needle"}
-    )
-
-    assert response.status_code == 500
-    assert response.json() == {"detail": "challenge file is not valid UTF-8"}
-
-
 def test_non_utf8_solution_file_returns_deterministic_json_error(
     isolated_challenges: Path,
     monkeypatch: pytest.MonkeyPatch,

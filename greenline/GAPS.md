@@ -380,12 +380,10 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
 
 ### 12. ~~Editor ergonomics~~ — CLOSED
 
-- **Implemented** in `Workspace.tsx` + `GET /api/challenges/{slug}/search`:
+- **Implemented** in `Workspace.tsx`:
   - Multiple editor tabs (`openTabs`), × / middle-click to close
   - Cmd/Ctrl+S saves the current file with a "saved" flash
   - `beforeunload` + `useBlocker` (data router) + confirm on back/Solution links
-  - SEARCH side tab + Cmd/Ctrl+Shift+F; click a hit to jump to file:line
-- Covered by `test_search_*` in `backend/tests/test_file_access.py`.
 
 ### 13. ~~Missing UI states~~ — CLOSED
 
@@ -394,7 +392,7 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   `api.*` accept `{ signal }`; aborted fetches are ignored via `isAbortError`.
 - **Narrow-viewport workspace:** CLOSED. Below Tailwind's `lg` breakpoint (1024px),
   the editor fills the workspace and the header **Panel** control toggles the
-  brief/files/search panel as an absolute overlay. Tailwind's `hidden` / `flex`
+  brief/files panel as an absolute overlay. Tailwind's `hidden` / `flex`
   utilities control its collapsed and open states. Opening a file auto-hides it.
 
 ---

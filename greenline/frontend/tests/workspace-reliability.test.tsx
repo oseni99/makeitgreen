@@ -87,10 +87,6 @@ function installServer({
     content: string
     response: ReturnType<typeof deferred<Response>>
   }> = []
-  const searches: Array<{
-    query: string
-    response: ReturnType<typeof deferred<Response>>
-  }> = []
   let runNumber = 0
   let jobPolls = 0
   let source = 'original source'
@@ -138,14 +134,6 @@ function installServer({
       const workspace = run?.workspace as Record<string, string> | undefined
       source = workspace?.['orders/service.py'] ?? 'original source'
       return json({ ok: true, run_id: Number(restoreMatch[1]), files_restored: Object.keys(workspace ?? {}).length })
-    }
-    if (url.startsWith('/api/challenges/orders-service/search?') && method === 'GET') {
-      const response = deferred<Response>()
-      searches.push({
-        query: new URL(url, 'http://localhost').searchParams.get('q') ?? '',
-        response,
-      })
-      return response.promise
     }
     if (url.endsWith('/files/orders/service.py') && method === 'GET') {
       return json({ content: source })
@@ -198,7 +186,7 @@ function installServer({
   })
 
   vi.stubGlobal('fetch', fetchMock)
-  return { fetchMock, saves, searches }
+  return { fetchMock, saves }
 }
 
 function renderWorkspace() {
@@ -222,6 +210,19 @@ afterEach(() => {
 })
 
 describe('workspace reliability', () => {
+  it('keeps workspace navigation focused on the brief and files', async () => {
+    installServer()
+    renderWorkspace()
+
+    await screen.findByDisplayValue('original source')
+    const workspacePanel = screen.getByRole('group', { name: 'Workspace panel' })
+    expect(within(workspacePanel).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Brief',
+      'Files',
+    ])
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull()
+  })
+
   it('preserves streamed output and gives hosted recovery guidance', () => {
     const output = formatRunFailureOutput(
       'challenge execution failed',
@@ -574,38 +575,6 @@ describe('workspace reliability', () => {
     expect((screen.getByRole('textbox', { name: 'code editor' }) as HTMLTextAreaElement).value).toBe('important unsaved work')
     expect(screen.getByTitle('orders/new.py').textContent).toContain('•')
     confirm.mockRestore()
-  })
-
-  it('keeps results from the latest search when an older request finishes last', async () => {
-    const { searches } = installServer()
-    const user = userEvent.setup()
-    renderWorkspace()
-    await screen.findByDisplayValue('original source')
-
-    await user.click(screen.getByRole('button', { name: 'Search' }))
-    const input = screen.getByRole('textbox', { name: 'search challenge files' })
-    await user.type(input, 'old query{enter}')
-    await waitFor(() => expect(searches).toHaveLength(1))
-
-    await user.clear(input)
-    await user.type(input, 'new query')
-    fireEvent.submit(input.closest('form')!)
-    await waitFor(() => expect(searches).toHaveLength(2))
-    expect(searches.map(({ query }) => query)).toEqual(['old query', 'new query'])
-
-    searches[1].response.resolve(json({
-      hits: [{ path: 'orders/service.py', line: 2, text: 'new result' }],
-    }))
-    expect(await screen.findByText('new result')).toBeTruthy()
-
-    searches[0].response.resolve(json({
-      hits: [{ path: 'orders/other.py', line: 1, text: 'stale result' }],
-    }))
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 0))
-    })
-    expect(screen.queryByText('stale result')).toBeNull()
-    expect(screen.getByText('new result')).toBeTruthy()
   })
 
   it('waits for the learner to choose and start a timer', async () => {

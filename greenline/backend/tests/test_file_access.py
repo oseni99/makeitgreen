@@ -387,28 +387,9 @@ def test_delete_missing_workspace_file_returns_404(isolated_backend):
     assert response.status_code == 404
 
 
-def test_search_finds_matches_and_prefers_workspace_overlay(isolated_backend):
-    repo_dir, workspaces_dir = isolated_backend
-    (repo_dir / "src" / "nested" / "service.py").write_text(
-        "def hello():\n    return 'alpha-token'\n"
-    )
-    ws_file = workspaces_dir / "sample" / "src" / "nested" / "service.py"
-    ws_file.parent.mkdir(parents=True)
-    ws_file.write_text("def hello():\n    return 'beta-token'\n")
+def test_search_endpoint_is_not_exposed(isolated_backend):
     client = TestClient(app)
 
-    response = client.get("/api/challenges/sample/search", params={"q": "beta-token"})
-    assert response.status_code == 200
-    hits = response.json()["hits"]
-    assert any(h["path"] == "src/nested/service.py" and h["line"] == 2 for h in hits)
+    response = client.get("/api/challenges/sample/search", params={"q": "needle"})
 
-    # Overlay wins: original alpha-token should not appear once overwritten.
-    response = client.get("/api/challenges/sample/search", params={"q": "alpha-token"})
-    assert response.json()["hits"] == []
-
-
-def test_search_empty_query_returns_no_hits(isolated_backend):
-    client = TestClient(app)
-    response = client.get("/api/challenges/sample/search", params={"q": "   "})
-    assert response.status_code == 200
-    assert response.json()["hits"] == []
+    assert response.status_code == 404
