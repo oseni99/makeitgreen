@@ -48,37 +48,39 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    raise SystemExit(0)\n"
         "if args[0] == 'start':\n"
         "    create = next(call for call in calls if call[0] == 'create')\n"
-        "    mount = create[create.index('--mount') + 1]\n"
-        "    source = next(v[4:] for v in mount.split(',') if v.startswith('src='))\n"
+        "    mounts = [create[index + 1] for index, value in enumerate(create) if value == '--mount']\n"
+        "    bundle_mount = next(value for value in mounts if 'dst=/run-bundle' in value)\n"
+        "    source = next(v[4:] for v in bundle_mount.split(',') if v.startswith('src='))\n"
         "    answer = (Path(source) / 'answer.txt').read_text().strip()\n"
+        "    report_mount = next((value for value in mounts if 'dst=/greenline-report' in value), None)\n"
+        "    if report_mount is not None:\n"
+        "        report_source = next(v[4:] for v in report_mount.split(',') if v.startswith('src='))\n"
+        "        green = answer == 'green'\n"
+        "        outcome = 'passed' if green else 'failed'\n"
+        "        report = {\n"
+        "            'summary': {'passed': int(green), 'failed': int(not green)},\n"
+        "            'tests': [{\n"
+        "                'nodeid': 'tests/test_answer.py::test_answer',\n"
+        "                'lineno': 2,\n"
+        "                'outcome': outcome,\n"
+        "                'call': {\n"
+        "                    'outcome': outcome,\n"
+        "                    'duration': 0.01,\n"
+        "                    'crash': {\n"
+        "                        'path': '/workspace/tests/test_answer.py',\n"
+        "                        'lineno': 3,\n"
+        "                        'message': '' if green else 'assert red == green',\n"
+        "                    },\n"
+        "                },\n"
+        "            }],\n"
+        "        }\n"
+        "        (Path(report_source) / 'report.json').write_text(json.dumps(report))\n"
         "    print(f'CONTAINER_STREAM answer={answer}', flush=True)\n"
         "    time.sleep(float(os.environ.get('FAKE_DOCKER_SLEEP', '0')))\n"
         "    raise SystemExit(0 if answer == 'green' else 1)\n"
         "if args[0] == 'cp':\n"
-        "    create = next(call for call in calls if call[0] == 'create')\n"
-        "    mount = create[create.index('--mount') + 1]\n"
-        "    source = next(v[4:] for v in mount.split(',') if v.startswith('src='))\n"
-        "    green = (Path(source) / 'answer.txt').read_text().strip() == 'green'\n"
-        "    outcome = 'passed' if green else 'failed'\n"
-        "    report = {\n"
-        "        'summary': {'passed': int(green), 'failed': int(not green)},\n"
-        "        'tests': [{\n"
-        "            'nodeid': 'tests/test_answer.py::test_answer',\n"
-        "            'lineno': 2,\n"
-        "            'outcome': outcome,\n"
-        "            'call': {\n"
-        "                'outcome': outcome,\n"
-        "                'duration': 0.01,\n"
-        "                'crash': {\n"
-        "                    'path': '/workspace/tests/test_answer.py',\n"
-        "                    'lineno': 3,\n"
-        "                    'message': '' if green else 'assert red == green',\n"
-        "                },\n"
-        "            },\n"
-        "        }],\n"
-        "    }\n"
-        "    Path(args[-1]).write_text(json.dumps(report))\n"
-        "    raise SystemExit(0)\n"
+        "    print('tmpfs report disappeared after container exit', file=sys.stderr)\n"
+        "    raise SystemExit(1)\n"
         "if args[0] == 'rm':\n"
         "    raise SystemExit(0)\n"
         "raise SystemExit(2)\n",
@@ -245,16 +247,19 @@ def test_container_adapter_isolates_and_normalizes_a_user_scoped_run(
         "PYTHONDONTWRITEBYTECODE=1",
     ]
     mounts = [create[index + 1] for index, value in enumerate(create) if value == "--mount"]
-    assert len(mounts) == 1
+    assert len(mounts) == 2
     assert "dst=/run-bundle" in mounts[0]
     assert "readonly" in mounts[0]
     assert "bind-propagation=rprivate" in mounts[0]
+    assert "dst=/greenline-report" in mounts[1]
+    assert "readonly" not in mounts[1]
+    assert "bind-propagation=rprivate" in mounts[1]
     source = next(value[4:] for value in mounts[0].split(",") if value.startswith("src="))
     assert Path(source).parent == bundle_root
     assert any(value.startswith("/workspace:rw,nosuid,nodev,size=") for value in create)
     container_name = create[create.index("--name") + 1]
     assert any(call[:3] == ["start", "--attach", container_name] for call in calls)
-    assert any(call[0] == "cp" for call in calls)
+    assert not any(call[0] == "cp" for call in calls)
     assert calls[-1][:2] == ["rm", "--force"]
 
 

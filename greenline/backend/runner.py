@@ -639,6 +639,7 @@ class ContainerExecutionAdapter:
         *,
         name: str,
         workspace: Path,
+        report_directory: Path,
         image: str,
         command: list[str],
     ) -> list[str]:
@@ -670,6 +671,11 @@ class ContainerExecutionAdapter:
                 f"type=bind,src={workspace},dst=/run-bundle,readonly,"
                 "bind-propagation=rprivate"
             ),
+            "--mount",
+            (
+                f"type=bind,src={report_directory},dst=/greenline-report,"
+                "bind-propagation=rprivate"
+            ),
             "--tmpfs",
             (
                 f"/workspace:rw,nosuid,nodev,size={policy.tmpfs_bytes},"
@@ -678,11 +684,6 @@ class ContainerExecutionAdapter:
             "--tmpfs",
             (
                 f"/tmp:rw,nosuid,nodev,size={policy.tmpfs_bytes},"
-                f"uid={uid},gid={gid},mode=0700"
-            ),
-            "--tmpfs",
-            (
-                "/greenline-report:rw,nosuid,nodev,size=16777216,"
                 f"uid={uid},gid={gid},mode=0700"
             ),
             image,
@@ -748,11 +749,20 @@ class ContainerExecutionAdapter:
             _materialized_workspace(
                 run, directory=self.policy.bundle_root
             ) as workspace,
-            tempfile.TemporaryDirectory(prefix=f"greenline-report-{run.slug}-") as report_tmp,
+            tempfile.TemporaryDirectory(
+                prefix=f"greenline-report-{run.slug}-",
+                dir=self.policy.bundle_root,
+            ) as report_tmp,
         ):
+            report_directory = Path(report_tmp)
+            # The Docker daemon sees this shared host path, while the execution
+            # UID needs write access to create pytest's report. The bundle root
+            # itself remains private to the worker account.
+            report_directory.chmod(0o733)
             create = self._container_command(
                 name=name,
                 workspace=workspace,
+                report_directory=report_directory,
                 image=image,
                 command=command,
             )
@@ -788,13 +798,7 @@ class ContainerExecutionAdapter:
                     timeout_seconds=self.policy.timeout_seconds,
                     on_output=on_output,
                 )
-                report_path = Path(report_tmp) / "report.json"
-                if exit_code != -1 and report_kind == "pytest-json":
-                    self._docker(
-                        "cp",
-                        f"{name}:/greenline-report/report.json",
-                        str(report_path),
-                    )
+                report_path = report_directory / "report.json"
                 return _normalized_result(
                     exit_code=exit_code,
                     output_tail=output_tail,
