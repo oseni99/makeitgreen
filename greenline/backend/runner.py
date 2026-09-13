@@ -7,20 +7,23 @@ container Adapter runs it with an explicit resource and isolation policy.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import queue
 import re
 import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
-from threading import Thread
-import time
 from pathlib import Path
+from threading import Event as ThreadEvent
+from threading import Lock, Thread
 from typing import Any, Callable, Iterator, Mapping, Protocol, TypedDict
 
 import challenges
@@ -37,7 +40,16 @@ MESSAGE_LIMIT = 4000
 # Cap pytest stdout/stderr forwarded to the client (tail kept).
 OUTPUT_LIMIT = 20_000
 
+# Keep durable Hosted Mode streaming responsive without making one database
+# transaction for every pytest output line. The final partial batch is flushed
+# before the reader finishes so terminal results retain the complete output.
+OUTPUT_STREAM_BATCH_SIZE = 4_096
+OUTPUT_STREAM_FLUSH_SECONDS = 0.1
+OUTPUT_STREAM_QUEUE_BATCHES = 8
+OUTPUT_STREAM_ENQUEUE_SECONDS = 0.01
+
 OutputCallback = Callable[[str], None]
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -164,6 +176,76 @@ class _OutputTail:
 
     def text(self) -> str:
         return "".join(self._chunks)
+
+
+class _OutputPublisher:
+    """Forward bounded output batches without blocking process capture."""
+
+    def __init__(self, callback: OutputCallback | None) -> None:
+        self._callback = callback
+        self._queue: queue.Queue[str] = queue.Queue(
+            maxsize=OUTPUT_STREAM_QUEUE_BATCHES
+        )
+        self._done = ThreadEvent()
+        self._failed = ThreadEvent()
+        self._pending = ""
+        self._pending_lock = Lock()
+        self._thread: Thread | None = None
+        if callback is not None:
+            self._thread = Thread(target=self._publish, daemon=True)
+            self._thread.start()
+
+    def enqueue(self, chunk: str) -> None:
+        if self._callback is None or self._failed.is_set() or not chunk:
+            return
+        with self._pending_lock:
+            start = 0
+            while start < len(chunk):
+                size = min(OUTPUT_STREAM_BATCH_SIZE - len(self._pending), len(chunk) - start)
+                self._pending += chunk[start : start + size]
+                start += size
+                if len(self._pending) == OUTPUT_STREAM_BATCH_SIZE:
+                    if not self._flush_pending_locked():
+                        return
+
+    def _flush_pending_locked(self) -> bool:
+        if not self._pending:
+            return True
+        batch, self._pending = self._pending, ""
+        try:
+            self._queue.put(batch, timeout=OUTPUT_STREAM_ENQUEUE_SECONDS)
+        except queue.Full:
+            # Streaming is best-effort once output exceeds the bounded queue;
+            # the independently captured terminal result remains authoritative.
+            return False
+        return True
+
+    def close(self) -> None:
+        with self._pending_lock:
+            self._flush_pending_locked()
+        self._done.set()
+
+    def join(self, timeout: float) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+
+    def _publish(self) -> None:
+        assert self._callback is not None
+        while not self._done.is_set() or not self._queue.empty():
+            try:
+                chunk = self._queue.get(timeout=OUTPUT_STREAM_FLUSH_SECONDS)
+            except queue.Empty:
+                # The reader may be blocked waiting for another line. Flush its
+                # partial batch here so silence cannot stall live output.
+                with self._pending_lock:
+                    self._flush_pending_locked()
+                continue
+            try:
+                self._callback(chunk)
+            except Exception:
+                self._failed.set()
+                LOGGER.exception("Challenge Run output streaming failed")
+                return
 
 
 def _parse_counts(output: str) -> dict[str, int]:
@@ -451,13 +533,18 @@ def _capture_process(
     on_output: OutputCallback | None,
 ) -> tuple[int, _OutputTail]:
     output_tail = _OutputTail(OUTPUT_LIMIT)
+    publisher = _OutputPublisher(on_output)
 
     def read_output() -> None:
         assert proc.stdout is not None
-        for chunk in proc.stdout:
-            output_tail.append(chunk)
-            if on_output is not None:
-                on_output(chunk)
+        try:
+            for chunk in proc.stdout:
+                # Capture first. Streaming is an observer of execution output and
+                # must not determine whether the terminal result is complete.
+                output_tail.append(chunk)
+                publisher.enqueue(chunk)
+        finally:
+            publisher.close()
 
     reader = Thread(target=read_output, daemon=True)
     reader.start()
@@ -468,6 +555,7 @@ def _capture_process(
         _terminate_timed_out_process(proc)
         exit_code = -1
     reader.join(timeout=TERMINATION_GRACE_SECONDS)
+    publisher.join(timeout=TERMINATION_GRACE_SECONDS)
     if exit_code == -1:
         output_tail.append(
             f"\n\nTIMEOUT: test run exceeded {timeout_seconds:g}s "

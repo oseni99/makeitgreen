@@ -2,9 +2,12 @@
 
 import os
 import signal
+import subprocess
+import sys
 import time
 import tracemalloc
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
@@ -226,6 +229,33 @@ def test_stdout_and_stderr_appear_in_output(
     assert "STDERR_MARKER_GL" in result["output"]
 
 
+def test_slow_stream_sink_does_not_cut_off_the_terminal_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tiny_repo(
+        tmp_path,
+        monkeypatch,
+        "def test_verbose_failure():\n"
+        "    for index in range(120):\n"
+        "        print(f'HOSTED_OUTPUT_LINE_{index:03d}')\n"
+        "    print('HOSTED_OUTPUT_FINAL_MARKER')\n"
+        "    assert False\n",
+    )
+    streamed: list[str] = []
+
+    def slow_durable_sink(chunk: str) -> None:
+        time.sleep(0.02)
+        streamed.append(chunk)
+
+    result = _execute("slow-stream-sink", slow_durable_sink)
+
+    assert "HOSTED_OUTPUT_FINAL_MARKER" in result["output"]
+    assert "1 failed" in result["output"]
+    assert result["output"].rstrip().splitlines()[-1].startswith("1 failed in ")
+    assert "HOSTED_OUTPUT_FINAL_MARKER" in "".join(streamed)
+    assert result["output_truncated"] is False
+
+
 def test_dependency_warnings_do_not_pollute_learner_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -381,6 +411,48 @@ def test_run_revalidates_a_durable_workspace_snapshot(
                 workspace={"tests/test_guard.py": "def test_green(): assert True\n"},
             )
         )
+
+
+def test_small_output_is_streamed_while_process_is_silent() -> None:
+    received = Event()
+    chunks: list[str] = []
+    results: list[tuple[int, runner._OutputTail]] = []
+
+    def observe(chunk: str) -> None:
+        chunks.append(chunk)
+        received.set()
+
+    with subprocess.Popen(
+        [
+            sys.executable, "-u", "-c",
+            "import sys; print('START_MARKER'); sys.stdin.readline(); print('END_MARKER')",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    ) as proc:
+        def capture_output() -> None:
+            results.append(runner._capture_process(
+                proc, timeout_seconds=5, on_output=observe,
+            ))
+
+        capture = Thread(target=capture_output)
+        capture.start()
+        try:
+            assert received.wait(1), "Output was buffered while the process was silent"
+            assert proc.poll() is None
+            assert "START_MARKER\n" in "".join(chunks)
+        finally:
+            assert proc.stdin is not None
+            proc.stdin.write("continue\n")
+            proc.stdin.flush()
+            capture.join(timeout=6)
+
+    assert not capture.is_alive()
+    assert results[0][0] == 0
+    assert results[0][1].text() == "START_MARKER\nEND_MARKER\n"
+    assert "".join(chunks) == results[0][1].text()
 
 
 def test_stream_callback_receives_output_before_result(
