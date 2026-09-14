@@ -1,4 +1,4 @@
-"""MakeItGreen API — a Gronex-style repo-based interview practice platform."""
+"""MakeItGreen API for repository-based interview practice."""
 from __future__ import annotations
 
 import os

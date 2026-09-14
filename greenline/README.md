@@ -1,8 +1,8 @@
 # MakeItGreen
 
-A local-first clone of [Gronex](https://gronex.org/) — repository-based backend
-interview practice. Real repos with failing tests, a browser workspace, a
-sandboxed test runner, and reviewed reference solutions.
+A repository-based backend and systems interview practice platform. Work in
+real repos with failing tests, a browser workspace, a sandboxed test runner,
+and reviewed reference solutions.
 
 ![status](https://img.shields.io/badge/tests-make%20them%20green-46f28a)
 

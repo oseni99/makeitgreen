@@ -9,8 +9,8 @@ suggested implementation approaches.
 
 ## Product context (30 seconds)
 
-MakeItGreen is a local-first clone of [gronex.org](https://gronex.org/) — repository-based
-backend interview practice. Core loop: open a challenge (a small broken repo), edit it in
+MakeItGreen is a repository-based backend and systems interview practice platform. Core
+loop: open a challenge (a small broken repo), edit it in
 a browser Monaco editor, run the declared test command in an isolated temporary
 workspace, make the failing tests green, and compare against a reference solution. The owner uses it to prep for
 work-sample style interviews (explore codebase / fix bugs / design features / review
@@ -147,12 +147,12 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   tenant-scoped preferences, debriefs, and events to Hosted Mode PostgreSQL. Hosted
   worker completion records run milestones inside the same fenced transaction.
 
-### 4. No AI mock interviewer (Gronex's differentiator) — PARKED
+### 4. No AI mock interviewer — PARKED
 
 - **Status:** explicitly deferred. Do not implement unless the owner reopens this.
 - **Current:** absent entirely.
-- **What Gronex does:** after tests go green, an AI interviewer asks live follow-ups —
-  changes a requirement, reviews the updated code, probes trade-offs.
+- **Possible extension:** after tests go green, an AI interviewer could ask live
+  follow-ups, change a requirement, review the updated code, and probe trade-offs.
 - **Why it matters most here:** the owner is prepping for interviews where the verbal
   follow-up ("why this fix, what breaks at scale, what if we add X") is what's graded.
 - **Suggested MVP:** on solved, show an "Interview me" panel. Backend endpoint that

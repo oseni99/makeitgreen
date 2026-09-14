@@ -42,11 +42,11 @@ function variantsFor(challenge: ChallengeSummary): ChallengeVariant[] {
   ]
 }
 
-function preferredVariant(challenge: ChallengeSummary): ChallengeVariant {
+function defaultVariant(challenge: ChallengeSummary): ChallengeVariant {
   const variants = variantsFor(challenge)
   return (
-    variants.find((variant) => variant.progress.status === 'attempted') ??
-    variants.find((variant) => variant.progress.status === 'todo') ??
+    variants.find((variant) => variant.language.toLowerCase() === 'python') ??
+    variants.find((variant) => variant.slug === challenge.slug) ??
     variants[0]
   )
 }
@@ -199,7 +199,7 @@ export default function Catalog() {
       {selectedTrack && (
         recommended ? (
           <Link
-            to={`/c/${preferredVariant(recommended).slug}`}
+            to={`/c/${defaultVariant(recommended).slug}`}
             aria-label={`${recommended.progress.status === 'attempted' ? 'Continue' : 'Recommended next'}: ${recommended.title}`}
             className="mt-5 block overflow-hidden rounded-xl border bg-card shadow-soft transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
@@ -279,7 +279,7 @@ export default function Catalog() {
             >
               <div className="flex flex-wrap items-center gap-2">
                 <Link
-                  to={`/c/${preferredVariant(c).slug}`}
+                  to={`/c/${defaultVariant(c).slug}`}
                   className="mr-auto min-w-[220px] text-lg font-semibold tracking-[-0.01em] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {c.title}
@@ -311,21 +311,12 @@ export default function Catalog() {
                 <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
                   <span className="mr-1 text-xs font-medium text-muted-foreground">Solve in</span>
                   {variants.map((variant) => (
-                    <Link
+                    <span
                       key={variant.id}
-                      to={`/c/${variant.slug}`}
-                      className={cn(
-                        'inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        variant.progress.status === 'attempted' && 'border-warning/40 bg-warning/10 text-warning',
-                        variant.progress.status === 'solved' && 'border-success/40 bg-success/10 text-success',
-                      )}
-                      aria-label={`${c.title}: ${variant.language}, ${variant.progress.status}`}
+                      className="inline-flex min-h-8 items-center rounded-full border bg-muted/30 px-3 text-xs font-semibold text-muted-foreground"
                     >
                       {variant.language}
-                      {variant.progress.status !== 'todo' && (
-                        <span aria-hidden="true">{variant.progress.status === 'solved' ? '✓' : '◐'}</span>
-                      )}
-                    </Link>
+                    </span>
                   ))}
                 </div>
               )}

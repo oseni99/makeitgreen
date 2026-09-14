@@ -131,11 +131,10 @@ completed tracker below.
 | Source | What it covers |
 |--------|----------------|
 | [Machine-coding problem collection](https://github.com/sasrivas25/machine-coding-lld-interview-problems) | 100 statement-only themes across LLD, concurrency, database, incidents, runtime, integrations, data/ML, and Linux |
-| [Gronex](https://gronex.org/) | Repository practice across 7 types and multiple languages; heap dumps, GC logs, DB incidents, weekly cadence |
 | Datadog interview guides (2025–2026) | Log parsers, metrics aggregators, rate limiters, thread-safe structures, LRU+TTL, streaming top-K |
 | Stripe Bug Squash / Retool debugging | Unfamiliar repo, failing tests, process graded over speed; single- vs multi-bug |
-| Gronex DB track | PostgreSQL transactions, indexes, migrations, replication, partitioning, CDC, outbox |
-| Gronex Runtime track | Heap evidence, thread dumps, GC logs — retention, deadlocks, starvation, allocation churn |
+| Database interview patterns | PostgreSQL transactions, indexes, migrations, replication, partitioning, CDC, outbox |
+| Runtime-diagnostics patterns | Heap evidence, thread dumps, GC logs — retention, deadlocks, starvation, allocation churn |
 
 ---
 
@@ -147,8 +146,8 @@ completed tracker below.
 | Retool multi-bug failing tests | Yes (`subscription-renew`, `vendor-catalog-reconcile`) | Research a third multi-bug scenario |
 | Datadog log parser / aggregator | Partial → **`log-aggregator`** | `log-aggregator`, `metrics-rollups` |
 | Datadog rate limiter / thread-safe DS | Yes (`rate-limiter`, `transfer-deadlock`, `thumbnail-handoff`) | Continue multi-language depth |
-| Gronex heap/thread/GC diagnostics | Yes (`report-latency`, `thread-stall`, `build-stream-leak`, `audit-archive-stream`, `thumbnail-handoff`, `gc-churn`) | Research a GC-log or native-runtime scenario next |
-| Gronex DB outbox/replication/migrations | Yes, including CDC projection and SQL window isolation | Continue database depth |
+| Heap/thread/GC diagnostics | Yes (`report-latency`, `thread-stall`, `build-stream-leak`, `audit-archive-stream`, `thumbnail-handoff`, `gc-churn`) | Research a GC-log or native-runtime scenario next |
+| DB outbox/replication/migrations | Yes, including CDC projection and SQL window isolation | Continue database depth |
 | Machine coding “extend the service” | Yes, including two Node repositories | Continue multi-language depth |
 
 ---
@@ -192,7 +191,7 @@ Strong interview realism + good fit for MakeItGreen's repo/pytest format.
 |-------|-------|
 | **Pattern** | Orders save but events never fire; duplicate events on retry |
 | **Bug** | Outbox row not in same transaction; publisher doesn't mark `published_at`; no dedupe |
-| **Why** | Gronex lists outbox + CDC; Datadog/FDE-relevant |
+| **Why** | Outbox and CDC are production-relevant distributed-systems patterns |
 | **Note** | SQLite + fake in-process publisher in tests (no Kafka) |
 
 ### `cache-ext` — Architecture Extension (Medium, 30 min) ✅ IMPLEMENTED
@@ -211,7 +210,7 @@ Strong interview realism + good fit for MakeItGreen's repo/pytest format.
 | **Pattern** | API stops accepting requests; CPU ~0% |
 | **Bug** | Deadlock or connection pool exhaustion |
 | **Evidence** | Readonly `diagnostics/threads.txt`, `diagnostics/sre-notes.md` |
-| **Why** | Gronex's second runtime theme (thread dumps vs profiler) |
+| **Why** | Complements profiler-based diagnosis with thread-dump analysis |
 
 ---
 
@@ -254,7 +253,7 @@ Mirror CoderPad "applied data processing" rounds; frame as fix/extend a broken c
 
 ---
 
-## Tier 3 — Gronex parity & other formats — COMPLETE
+## Tier 3 — Additional formats — COMPLETE
 
 | Slug | Type | Theme | Effort |
 |------|------|-------|--------|
@@ -266,7 +265,7 @@ Mirror CoderPad "applied data processing" rounds; frame as fix/extend a broken c
 | `gc-churn` | Runtime Diagnostics | Unbounded response rendering drives allocation churn | ✅ |
 | `cdc-slot` | Database Engineering | Multi-consumer CDC retention and acknowledgement | ✅ |
 
-**Still optional for future parity:** another language beyond Python/JavaScript.
+**Still optional for future coverage:** another language beyond Python/JavaScript.
 System-design diagram exercises are intentionally out of scope. Difficulty tracks,
 weekly cadence, prep guides, and JavaScript runtime support are already live.
 
