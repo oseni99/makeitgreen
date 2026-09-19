@@ -298,35 +298,28 @@ function RunGuidance({
   const jumpLine = firstFailure.crash_line || firstFailure.line
 
   return (
-    <div className="border-b border-white/10 px-4 py-4 text-sm leading-6 text-console-foreground">
-      <p className="font-semibold text-console-success">
-        Red is the starting line — the repo ships with failing tests on purpose.
-      </p>
-      <p className="mt-2">
-        Start with this one:{' '}
+    <div className="border-b border-white/10 px-4 py-2.5 text-xs leading-5 text-console-foreground">
+      <p>
+        <span className="font-semibold text-console-success">Start here:</span>{' '}
         <code className="text-console-warning">{testName}</code>
       </p>
-      {file && (
-        jumpFile && jumpLine ? (
-          <button
-            type="button"
-            className="mt-1 block font-mono text-xs text-console-muted underline decoration-transparent underline-offset-4 hover:text-console-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            title={`open ${jumpFile} at line ${jumpLine}`}
-            onClick={() => onJump(jumpFile, jumpLine)}
-          >
-            {file}
-          </button>
-        ) : (
-          <div className="mt-1 font-mono text-xs text-console-muted">{file}</div>
-        )
-      )}
-      <p className="mt-2 text-console-muted">
-        Make that single test pass, then run again. You don’t need to fix everything at once.
-      </p>
-      <p className="mt-3 border-t border-white/10 pt-3 text-console-success">
-        That’s your target — a failing test is the goal to beat, not a mistake. Read the failures
-        below, edit the source, and run again until every test is green.
-      </p>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-console-muted">
+        {file && (
+          jumpFile && jumpLine ? (
+            <button
+              type="button"
+              className="font-mono underline decoration-transparent underline-offset-4 hover:text-console-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={`open ${jumpFile} at line ${jumpLine}`}
+              onClick={() => onJump(jumpFile, jumpLine)}
+            >
+              {file}:{jumpLine}
+            </button>
+          ) : (
+            <span className="font-mono">{file}</span>
+          )
+        )}
+        <span>Fix this test, then run again.</span>
+      </div>
     </div>
   )
 }

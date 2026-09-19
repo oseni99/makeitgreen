@@ -293,10 +293,11 @@ describe('workspace reliability', () => {
 
     await user.click(screen.getByRole('button', { name: /run tests/i }))
 
-    expect(await screen.findByText(/Red is the starting line/)).toBeTruthy()
+    expect(await screen.findByText('Start here:')).toBeTruthy()
     expect(screen.getByText('test_minimum_fee_is_one_cent')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'tests/test_wallet.py' })).toBeTruthy()
-    expect(screen.getByText(/Make that single test pass/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'tests/test_wallet.py:41' })).toBeTruthy()
+    expect(screen.getByText('Fix this test, then run again.')).toBeTruthy()
+    expect(screen.queryByText(/Red is the starting line/)).toBeNull()
     expect(screen.getByText(/assert 0 == 1/)).toBeTruthy()
   })
 
@@ -330,7 +331,7 @@ describe('workspace reliability', () => {
     expect(await screen.findByText(/partial streamed output/)).toBeTruthy()
     streamingReport.scrollTop = 200
 
-    expect(await screen.findByText(/Red is the starting line/)).toBeTruthy()
+    expect(await screen.findByText('Start here:')).toBeTruthy()
     const completedReport = screen.getByLabelText('Test report')
     expect(completedReport).not.toBe(streamingReport)
     expect(completedReport.scrollTop).toBe(0)
