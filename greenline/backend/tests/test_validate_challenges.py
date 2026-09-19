@@ -345,7 +345,10 @@ def test_node_package_audit_accepts_builtins_and_relative_modules(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "test.js").write_text(
-        "const test = require('node:test');\nconst app = require('./app');\n",
+        "const fs = require('fs');\n"
+        "const path = require('path');\n"
+        "const test = require('node:test');\n"
+        "const app = require('./app');\n",
         encoding="utf-8",
     )
 

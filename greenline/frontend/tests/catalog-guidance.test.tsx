@@ -102,7 +102,7 @@ it('guides a selected prep path toward an attempted challenge', async () => {
   await user.click(await screen.findByRole('radio', { name: /Distributed correctness/i }))
 
   const recommendation = screen.getByRole('link', { name: 'Continue: Orders service' })
-  expect(recommendation.getAttribute('href')).toBe('/c/orders-service')
+  expect(recommendation.getAttribute('href')).toBe('/c/orders-service@javascript')
   expect(screen.getByRole('link', { name: 'Orders service' }).getAttribute('href')).toBe('/c/orders-service')
   expect(screen.queryByRole('link', { name: /Orders service: Python/ })).toBeNull()
   expect(screen.queryByRole('link', { name: /Orders service: JavaScript/ })).toBeNull()

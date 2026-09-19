@@ -7,6 +7,7 @@ absolute path. Discovers challenges next to this script's parent directory.
 from __future__ import annotations
 
 import ast
+import functools
 import json
 import math
 import re
@@ -335,6 +336,27 @@ def unsupported_python_imports(
     return unsupported
 
 
+@functools.cache
+def node_builtin_modules() -> frozenset[str]:
+    """Return the builtin module specifiers supported by the installed Node runtime."""
+    proc = subprocess.run(
+        [
+            "node",
+            "-e",
+            "process.stdout.write(JSON.stringify(require('node:module').builtinModules))",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    modules = json.loads(proc.stdout)
+    if not isinstance(modules, list) or not all(
+        isinstance(module, str) for module in modules
+    ):
+        raise ValueError("Node returned an invalid builtin module list")
+    return frozenset(module.removeprefix("node:") for module in modules)
+
+
 def unsupported_node_imports(repo: Path) -> set[str]:
     """Find bare Node imports; the execution image contains no npm packages."""
     patterns = (
@@ -343,6 +365,7 @@ def unsupported_node_imports(repo: Path) -> set[str]:
         re.compile(r"\bimport\s*['\"]([^'\"]+)['\"]"),
         re.compile(r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]"),
     )
+    builtins = node_builtin_modules()
     unsupported: set[str] = set()
     for source in (
         path
@@ -357,7 +380,10 @@ def unsupported_node_imports(repo: Path) -> set[str]:
             continue
         for pattern in patterns:
             for specifier in pattern.findall(content):
-                if not specifier.startswith((".", "/", "node:")):
+                if (
+                    not specifier.startswith((".", "/", "node:"))
+                    and specifier not in builtins
+                ):
                     unsupported.add(specifier)
     return unsupported
 

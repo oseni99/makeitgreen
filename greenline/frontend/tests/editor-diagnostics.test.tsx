@@ -223,6 +223,7 @@ describe('workspace editor diagnostics', () => {
     await screen.findByRole('textbox', { name: 'code editor' })
     await user.click(screen.getByRole('button', { name: /run tests/i }))
     const jump = await screen.findByTitle('open orders/checkout.py at line 7')
+    expect(jump.textContent).toBe('orders/checkout.py:7')
     await user.click(jump)
 
     await waitFor(() => expect(editorHarness.revealLineInCenter).toHaveBeenCalledWith(7))

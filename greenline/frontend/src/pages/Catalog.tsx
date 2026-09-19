@@ -51,6 +51,13 @@ function defaultVariant(challenge: ChallengeSummary): ChallengeVariant {
   )
 }
 
+function recommendationVariant(challenge: ChallengeSummary): ChallengeVariant {
+  return (
+    variantsFor(challenge).find((variant) => variant.progress.status === 'attempted') ??
+    defaultVariant(challenge)
+  )
+}
+
 export default function Catalog() {
   const [challenges, setChallenges] = useState<ChallengeSummary[] | null>(null)
   const [error, setError] = useState(false)
@@ -199,7 +206,7 @@ export default function Catalog() {
       {selectedTrack && (
         recommended ? (
           <Link
-            to={`/c/${defaultVariant(recommended).slug}`}
+            to={`/c/${recommendationVariant(recommended).slug}`}
             aria-label={`${recommended.progress.status === 'attempted' ? 'Continue' : 'Recommended next'}: ${recommended.title}`}
             className="mt-5 block overflow-hidden rounded-xl border bg-card shadow-soft transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >

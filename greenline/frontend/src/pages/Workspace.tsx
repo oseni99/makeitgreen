@@ -304,18 +304,18 @@ function RunGuidance({
         <code className="text-console-warning">{testName}</code>
       </p>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-console-muted">
-        {file && (
-          jumpFile && jumpLine ? (
+        {jumpFile && (
+          jumpLine ? (
             <button
               type="button"
               className="font-mono underline decoration-transparent underline-offset-4 hover:text-console-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               title={`open ${jumpFile} at line ${jumpLine}`}
               onClick={() => onJump(jumpFile, jumpLine)}
             >
-              {file}:{jumpLine}
+              {jumpFile}:{jumpLine}
             </button>
           ) : (
-            <span className="font-mono">{file}</span>
+            <span className="font-mono">{jumpFile}</span>
           )
         )}
         <span>Fix this test, then run again.</span>
