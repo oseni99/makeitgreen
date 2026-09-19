@@ -108,7 +108,7 @@
   }
 
   .workspace-context {
-    background-image: linear-gradient(100deg, rgb(255 255 255 / 0.75), rgb(246 245 244 / 0.55));
+    background: var(--background);
   }
 
   .workspace-sidebar {

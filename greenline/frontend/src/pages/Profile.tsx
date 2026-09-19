@@ -10,6 +10,7 @@ import {
   type SolveActivity,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PageLoading } from '../components/PageLoading'
 import { PREP_PATH_NAMES, PREP_TRACKS } from '../prepPaths'
 import { buttonVariants } from '@/components/ui/button-variants'
 import { Button } from '@/components/ui/button'
@@ -112,7 +113,7 @@ function ConfiguredProfile() {
     )
   }
   if (!isLoaded || !challenges || !preferences || !activity) {
-    return <div className="py-32 text-center text-sm text-muted-foreground">Loading profile…</div>
+    return <PageLoading label="Loading profile…" />
   }
   if (!isSignedIn || !user) return <Navigate to="/sign-in" replace />
 

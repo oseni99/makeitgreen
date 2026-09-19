@@ -10,6 +10,7 @@ import {
   type Solution as SolutionData,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PageLoading } from '../components/PageLoading'
 import { defineGreenlineTheme } from '../monacoTheme'
 import { Button } from '@/components/ui/button'
 import { buttonVariants } from '@/components/ui/button-variants'
@@ -153,7 +154,7 @@ function DebriefCard({ slug, initial }: { slug: string; initial: Debrief | null 
     'mt-2 min-h-[76px] w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-shadow placeholder:text-muted-foreground focus:ring-2 focus:ring-ring'
 
   return (
-    <section className="mt-14 rounded-xl border bg-card p-6 shadow-soft md:p-8">
+    <section className="mt-14 rounded-xl border bg-card p-6 md:p-8">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
         Close the loop
       </p>
@@ -378,7 +379,7 @@ export default function Solution() {
           ← back to workspace
         </Link>
         <h1 className="mt-6 text-[clamp(2.5rem,5vw,3.375rem)] font-bold leading-none tracking-[-0.035em]">Reference solution</h1>
-        <div className="mt-8 rounded-lg border bg-card p-7 shadow-soft">
+        <div className="mt-8 rounded-lg border bg-card p-7">
           <p className="mb-5 text-muted-foreground">Viewing the solution marks this challenge as spoiled — attempt it first?</p>
           <div className="flex flex-wrap gap-3">
             <Button
@@ -397,8 +398,7 @@ export default function Solution() {
       </main>
     )
   }
-  if (!solution)
-    return <div className="py-32 text-center text-sm text-muted-foreground">Loading solution…</div>
+  if (!solution) return <PageLoading label="Loading solution…" />
 
   return (
     <main className="mx-auto max-w-[920px] px-6 py-14 md:px-10 md:py-20">

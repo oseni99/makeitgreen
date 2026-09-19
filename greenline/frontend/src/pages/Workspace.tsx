@@ -11,6 +11,7 @@ import {
   type RunResult,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PageLoading } from '../components/PageLoading'
 import { defineGreenlineTheme } from '../monacoTheme'
 import { formatRunFailureOutput } from '../runFailure'
 import {
@@ -879,7 +880,7 @@ export default function Workspace() {
   }
 
   if (!challenge)
-    return <div className="py-32 text-center text-sm text-muted-foreground">Opening workspace…</div>
+    return <PageLoading label="Opening workspace…" />
 
   const openFileMeta = challenge.files.find((f) => f.path === openPath)
   const solved = challenge.progress.status === 'solved'

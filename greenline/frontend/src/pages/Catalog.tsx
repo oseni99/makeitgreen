@@ -8,6 +8,7 @@ import {
   type PrepPath,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PageLoading } from '../components/PageLoading'
 import { PREP_TRACKS } from '../prepPaths'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -144,8 +145,7 @@ export default function Catalog() {
       />
     )
   }
-  if (!challenges)
-    return <div className="py-32 text-center text-sm text-muted-foreground">Loading challenges…</div>
+  if (!challenges) return <PageLoading label="Loading challenges…" />
 
   return (
     <main className="mx-auto max-w-[1080px] px-6 py-16 md:px-10 md:py-24">
@@ -171,8 +171,8 @@ export default function Catalog() {
               <label
                 key={track.id}
                 className={cn(
-                  'relative cursor-pointer rounded-xl border bg-card p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:shadow-soft focus-within:ring-2 focus-within:ring-ring',
-                  selected && 'border-primary shadow-soft',
+                  'relative cursor-pointer rounded-xl border bg-card p-4 transition-colors hover:border-black/20 focus-within:ring-2 focus-within:ring-ring',
+                  selected && 'border-primary',
                 )}
               >
                 <input
@@ -208,7 +208,7 @@ export default function Catalog() {
           <Link
             to={`/c/${recommendationVariant(recommended).slug}`}
             aria-label={`${recommended.progress.status === 'attempted' ? 'Continue' : 'Recommended next'}: ${recommended.title}`}
-            className="mt-5 block overflow-hidden rounded-xl border bg-card shadow-soft transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="mt-5 block overflow-hidden rounded-xl border bg-card shadow-soft transition-[border-color,box-shadow] hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             <span className="flex flex-wrap items-center gap-5 px-5 py-5 md:px-6">
               <span className="mr-auto min-w-[220px]">
@@ -281,7 +281,7 @@ export default function Catalog() {
           const variants = variantsFor(c)
           return (
             <article
-              className="rounded-lg border bg-card p-5 transition-[border-color,box-shadow] hover:border-black/20 hover:shadow-soft"
+              className="rounded-lg border bg-card p-5 transition-colors hover:border-black/20"
               key={c.concept_slug ?? c.slug}
             >
               <div className="flex flex-wrap items-center gap-2">

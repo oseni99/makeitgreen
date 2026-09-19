@@ -4,34 +4,12 @@ import './monacoSetup'
 import { ClerkProvider } from '@clerk/react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import App from './App'
-import { AuthBridge, RouteGate, SignInPage } from './auth'
-import Landing from './pages/Landing'
-import Catalog from './pages/Catalog'
-import Profile from './pages/Profile'
-import { SolutionRoute, WorkspaceRoute } from './pages/KeyedRoutes'
+import { AuthBridge } from './auth'
 import { clerkAppearance } from './clerkAppearance'
+import { appRoutes } from './routes'
 import './styles/globals.css'
 
-const router = createBrowserRouter([
-  {
-    path: '/',
-    element: <App />,
-    children: [
-      { index: true, element: <Landing /> },
-      { path: 'sign-in/*', element: <SignInPage /> },
-      {
-        element: <RouteGate />,
-        children: [
-          { path: 'challenges', element: <Catalog /> },
-          { path: 'profile', element: <Profile /> },
-          { path: 'c/:slug', element: <WorkspaceRoute /> },
-          { path: 'c/:slug/solution', element: <SolutionRoute /> },
-        ],
-      },
-    ],
-  },
-])
+const router = createBrowserRouter(appRoutes)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
