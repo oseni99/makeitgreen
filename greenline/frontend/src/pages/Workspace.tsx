@@ -1005,7 +1005,7 @@ export default function Workspace() {
                         selected && 'border-primary bg-primary text-primary-foreground hover:text-primary-foreground',
                       )}
                       onClick={() => {
-                        if (!selected) navigate(`/c/${variant.slug}`)
+                        if (!selected) navigate(`/c/${variant.slug}`, { replace: true })
                       }}
                     >
                       {variant.language}

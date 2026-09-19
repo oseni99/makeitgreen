@@ -72,12 +72,14 @@ function deferred<T>() {
 function installServer({
   failSecondFile = false,
   includeNewFile = false,
+  includeVariants = false,
   runResult = {},
   streamBeforeComplete = false,
   historyRuns = [],
 }: {
   failSecondFile?: boolean
   includeNewFile?: boolean
+  includeVariants?: boolean
   runResult?: Record<string, unknown>
   streamBeforeComplete?: boolean
   historyRuns?: Array<Record<string, unknown>>
@@ -164,17 +166,40 @@ function installServer({
       })
       return response.promise
     }
-    if (url === '/api/challenges/orders-service' && method === 'GET') {
+    if (
+      (url === '/api/challenges/orders-service' ||
+        (includeVariants && url === '/api/challenges/orders-service@javascript')) &&
+      method === 'GET'
+    ) {
+      const javascript = url.endsWith('@javascript')
       return json({
-        slug: 'orders-service',
+        slug: javascript ? 'orders-service@javascript' : 'orders-service',
         title: 'orders-service',
         type: 'Concurrency',
         difficulty: 'Medium',
         minutes: 25,
-        language: 'Python',
+        language: javascript ? 'JavaScript' : 'Python',
         blurb: 'Repair the race.',
         brief: 'Make checkout atomic.',
         progress: { status: 'todo', attempts: 0, spoiled: false },
+        ...(includeVariants
+          ? {
+              variants: [
+                {
+                  id: 'python',
+                  language: 'Python',
+                  slug: 'orders-service',
+                  progress: { status: 'todo', attempts: 0 },
+                },
+                {
+                  id: 'javascript',
+                  language: 'JavaScript',
+                  slug: 'orders-service@javascript',
+                  progress: { status: 'todo', attempts: 0 },
+                },
+              ],
+            }
+          : {}),
         files: [
           { path: 'orders/service.py', readonly: false, edited: false },
           { path: 'orders/other.py', readonly: false, edited: false },
@@ -210,6 +235,31 @@ afterEach(() => {
 })
 
 describe('workspace reliability', () => {
+  it('replaces the current history entry when switching challenge languages', async () => {
+    installServer({ includeVariants: true })
+    const user = userEvent.setup()
+    const router = createMemoryRouter(
+      [
+        { path: '/challenges', element: <div>Challenge catalog</div> },
+        { path: '/c/:slug', element: <WorkspaceRoute /> },
+      ],
+      {
+        initialEntries: ['/challenges', '/c/orders-service'],
+        initialIndex: 1,
+      },
+    )
+    render(<RouterProvider router={router} />)
+
+    await screen.findByDisplayValue('original source')
+    await user.click(screen.getByRole('button', { name: 'JavaScript' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/c/orders-service@javascript'))
+
+    await act(async () => router.navigate(-1))
+
+    expect(await screen.findByText('Challenge catalog')).toBeTruthy()
+    expect(router.state.location.pathname).toBe('/challenges')
+  })
+
   it('keeps workspace navigation focused on the brief and files', async () => {
     installServer()
     renderWorkspace()
