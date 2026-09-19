@@ -19,6 +19,7 @@ SPEC.loader.exec_module(validate_challenges)
     [
         ("minutes", "30"),
         ("minimum_tests", 0),
+        ("minimum_tests", 14),
         ("minimum_tests", 14.5),
         ("minimum_tests", "15"),
         ("maximum_pristine_pass_percent", 0),
@@ -76,7 +77,7 @@ def test_pristine_validator_accepts_normal_test_failure(
     solution.mkdir()
     (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
 
-    results = iter([(1, "one failed"), (0, "solution passed")])
+    results = iter([(1, "14 failed, 1 passed"), (0, "15 passed")])
     monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
     monkeypatch.setattr(validate_challenges, "run_pytest", lambda _workdir: next(results))
 
@@ -124,7 +125,7 @@ def test_validator_accepts_solution_at_declared_test_minimum(
     )
     (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
 
-    results = iter([(1, "1 failed, 14 passed"), (0, "15 passed in 0.01s")])
+    results = iter([(1, "10 failed, 5 passed"), (0, "15 passed in 0.01s")])
     monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
     monkeypatch.setattr(
         validate_challenges,
@@ -176,7 +177,7 @@ def test_validator_accepts_pristine_suite_below_declared_pass_limit(
     )
     (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
 
-    results = iter([(1, "8 failed, 2 passed in 0.01s"), (0, "10 passed in 0.01s")])
+    results = iter([(1, "13 failed, 2 passed in 0.01s"), (0, "15 passed in 0.01s")])
     monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
     monkeypatch.setattr(
         validate_challenges,
@@ -235,6 +236,131 @@ def test_medium_challenges_inherit_catalog_quality_thresholds(
     )
 
     assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_all_difficulties_inherit_catalog_test_minimum(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(json.dumps({"difficulty": "Hard"}))
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "13 failed, 1 passed"), (0, "14 passed")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_all_difficulties_reject_more_than_five_pristine_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    challenges_dir = tmp_path / "challenges"
+    challenge = challenges_dir / "demo"
+    repo = challenge / "repo"
+    solution = challenge / "solution"
+    repo.mkdir(parents=True)
+    solution.mkdir()
+    (challenge / "challenge.json").write_text(json.dumps({"difficulty": "Easy"}))
+    (repo / "test_demo.py").write_text("def test_demo(): assert False\n")
+
+    results = iter([(1, "9 failed, 6 passed"), (0, "15 passed")])
+    monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
+    monkeypatch.setattr(
+        validate_challenges,
+        "run_suite",
+        lambda _challenge, _workdir: next(results),
+    )
+
+    assert validate_challenges.validate_challenge("demo") is False
+
+
+def test_execution_image_imports_are_read_from_pinned_requirements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(
+        "pytest==8.4.2\nfastapi==0.141.*\npydantic==2.13.*\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        validate_challenges,
+        "PYTHON_EXECUTION_REQUIREMENTS",
+        requirements,
+    )
+
+    assert validate_challenges.execution_image_imports() == {
+        "pytest",
+        "fastapi",
+        "pydantic",
+    }
+
+
+def test_package_audit_accepts_stdlib_local_and_execution_image_imports(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "local_module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text(
+        "import json\nfrom local_module import VALUE\nfrom fastapi import FastAPI\n",
+        encoding="utf-8",
+    )
+
+    assert validate_challenges.unsupported_python_imports(tmp_path) == set()
+
+
+def test_package_audit_rejects_import_missing_from_execution_image(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "app.py").write_text("import definitely_missing_package\n")
+
+    assert validate_challenges.unsupported_python_imports(tmp_path) == {
+        "definitely_missing_package"
+    }
+
+
+def test_package_audit_accepts_module_declared_as_creatable(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "test_extension.py").write_text("import learner_extension\n")
+
+    assert validate_challenges.unsupported_python_imports(
+        tmp_path,
+        creatable=["learner_extension.py"],
+    ) == set()
+
+
+def test_node_package_audit_accepts_builtins_and_relative_modules(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "test.js").write_text(
+        "const test = require('node:test');\nconst app = require('./app');\n",
+        encoding="utf-8",
+    )
+
+    assert validate_challenges.unsupported_node_imports(tmp_path) == set()
+
+
+def test_node_package_audit_rejects_unavailable_npm_package(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "app.js").write_text(
+        "import express from 'express';\n",
+        encoding="utf-8",
+    )
+
+    assert validate_challenges.unsupported_node_imports(tmp_path) == {"express"}
 
 
 @pytest.mark.parametrize(
@@ -422,7 +548,11 @@ def test_validator_discovers_and_validates_language_variant(
     ) -> tuple[int, str]:
         calls.append((workdir, variant_id))
         content = (workdir / "main.js").read_text()
-        return (0 if content == "fixed\n" else 1, "")
+        return (
+            (0, "# tests 15\n# pass 15\n# fail 0\n")
+            if content == "fixed\n"
+            else (1, "# tests 15\n# pass 1\n# fail 14\n")
+        )
 
     monkeypatch.setattr(validate_challenges, "CHALLENGES_DIR", challenges_dir)
     monkeypatch.setattr(validate_challenges, "run_suite", fake_run_suite)

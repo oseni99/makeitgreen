@@ -69,3 +69,37 @@ def test_concurrent_consumers_receive_each_item_once() -> None:
     flattened = [item for chunk in chunks for item in chunk]
     assert sorted(flattened) == list(range(20))
     assert len(flattened) == len(set(flattened))
+
+
+@pytest.mark.parametrize("item", ["one", "two", "three", "four", "five"])
+def test_each_spurious_wakeup_rechecks_before_waiting_for_item(item: str) -> None:
+    woke = Event()
+    queue = HandoffQueue[str](expected_waiters=1, on_wake=woke)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(queue.get)
+        assert queue.all_waiting.wait(timeout=1)
+        queue.poke_all()
+        assert woke.wait(timeout=1)
+        queue.put(item)
+        assert result.result(timeout=1) == item
+
+
+@pytest.mark.parametrize("waiter_count", [1, 2, 4, 6, 8])
+def test_close_broadcasts_terminal_state_to_each_waiter(waiter_count: int) -> None:
+    queue = HandoffQueue[str](expected_waiters=waiter_count)
+    results: list[str | None] = []
+    threads = [Thread(target=lambda: results.append(queue.get()), daemon=True) for _ in range(waiter_count)]
+    for thread in threads:
+        thread.start()
+    assert queue.all_waiting.wait(timeout=1)
+
+    queue.close()
+    for thread in threads:
+        thread.join(timeout=0.2)
+    still_alive = [thread for thread in threads if thread.is_alive()]
+    queue.poke_all()
+    for thread in still_alive:
+        thread.join(timeout=1)
+
+    assert still_alive == []
+    assert results == [None] * waiter_count

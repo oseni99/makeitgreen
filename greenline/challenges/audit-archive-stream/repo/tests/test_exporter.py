@@ -56,3 +56,33 @@ def test_source_is_consumed_only_once() -> None:
 
     with pytest.raises(RuntimeError, match="cannot be rewound"):
         list(source)
+
+
+@pytest.mark.parametrize(
+    ("count", "chunk_size"),
+    [(2, 1), (3, 2), (17, 4), (257, 128)],
+)
+def test_first_upload_does_not_retain_later_rows_or_records(
+    count: int, chunk_size: int
+) -> None:
+    tracker, source, _, exporter = setup(count, chunk_size=chunk_size)
+
+    exporter.export(source)
+
+    assert tracker.max_live_rows <= 2
+    assert tracker.max_live_records <= chunk_size
+
+
+@pytest.mark.parametrize("fail_on_call", [1, 2, 3])
+def test_each_failed_upload_stops_before_reading_the_next_chunk(
+    fail_on_call: int,
+) -> None:
+    chunk_size = 4
+    _, source, _, exporter = setup(
+        100, chunk_size=chunk_size, fail_on_call=fail_on_call
+    )
+
+    with pytest.raises(SinkFailure):
+        exporter.export(source)
+
+    assert source.consumed <= fail_on_call * chunk_size

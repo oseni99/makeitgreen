@@ -53,3 +53,42 @@ def test_repeated_create_is_idempotent() -> None:
     assert second == first
     assert store.list_orders() == [first]
     assert store.outbox_count() == 1
+
+
+@pytest.mark.parametrize(
+    ("order_id", "customer_id", "total_cents"),
+    [
+        ("o-first", "c-1", 1),
+        ("o-middle", "c-2", 500),
+        ("o-large", "c-3", 1_000_000),
+    ],
+)
+def test_each_order_write_rolls_back_when_outbox_enqueue_fails(
+    order_id: str,
+    customer_id: str,
+    total_cents: int,
+) -> None:
+    store = Store()
+
+    def fail_between_writes() -> None:
+        raise RuntimeError("simulated enqueue outage")
+
+    with pytest.raises(RuntimeError, match="enqueue outage"):
+        OrderService(store, before_enqueue=fail_between_writes).create_order(
+            order_id, customer_id, total_cents
+        )
+
+    assert store.get_order(order_id) is None
+    assert store.outbox_count() == 0
+
+
+def test_retrying_existing_order_id_returns_original_without_new_event() -> None:
+    store = Store()
+    service = OrderService(store)
+    original = service.create_order("o-1", "original-customer", 100)
+
+    retried = service.create_order("o-1", "changed-customer", 999)
+
+    assert retried == original
+    assert store.list_orders() == [original]
+    assert store.outbox_count() == 1

@@ -82,3 +82,17 @@ def test_worker_publishes_pending_rows_in_fifo_order() -> None:
 
     assert _worker(store, publisher).run_once() == 2
     assert publisher.attempts == ["order.created:o-1", "order.created:o-2"]
+
+
+@pytest.mark.parametrize("limit", [1, 2, 3])
+def test_success_marks_every_row_selected_by_the_poll_limit(limit: int) -> None:
+    store = Store()
+    service = OrderService(store)
+    for number in range(1, 4):
+        service.create_order(f"o-{number}", f"c-{number}", number * 100)
+    publisher = FakePublisher()
+    worker = _worker(store, publisher)
+
+    assert worker.run_once(limit=limit) == limit
+    for number in range(1, limit + 1):
+        assert store.get_event(f"order.created:o-{number}").published_at is not None

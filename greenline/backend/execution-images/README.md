@@ -4,7 +4,9 @@ The container execution Adapter never pulls or builds images while handling a
 Challenge Run. Build, scan, publish, and preload the images during deployment,
 then configure their immutable registry digests.
 
-The Python image contains the platform's supported pytest toolchain:
+The Python image contains the platform's supported pytest toolchain plus the
+FastAPI/Pydantic/HTTPX contract used by API challenges. Challenge validation
+rejects undeclared third-party imports before catalog content can ship:
 
 ```bash
 docker build -t registry.example.com/greenline-python:2026-09 \

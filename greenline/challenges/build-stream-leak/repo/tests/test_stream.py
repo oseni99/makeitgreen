@@ -84,3 +84,65 @@ def test_publish_can_race_with_close_safely() -> None:
     assert errors == []
     assert len(stream.events) <= 1
     assert hub.subscriber_count == 0
+
+
+@pytest.mark.parametrize("stream_count", [1, 2, 8, 32])
+def test_every_closed_stream_releases_its_hub_subscription(
+    stream_count: int,
+) -> None:
+    hub = EventHub()
+    service = StreamService(hub)
+    streams = [service.open(f"build-{number}") for number in range(stream_count)]
+
+    for stream in streams:
+        service.close(stream)
+
+    assert service.active_count == 0
+    assert hub.subscriber_count == 0
+
+
+@pytest.mark.parametrize("attempts", [1, 3, 10])
+def test_repeated_partial_initialization_never_accumulates_subscribers(
+    attempts: int,
+) -> None:
+    hub = EventHub()
+    service = StreamService(hub)
+
+    for number in range(attempts):
+        with pytest.raises(RuntimeError, match="failed to initialize"):
+            service.open(f"build-{number}", fail_after_subscribe=True)
+
+    assert service.active_count == 0
+    assert hub.subscriber_count == 0
+
+
+def test_closing_one_stream_keeps_other_streams_subscribed() -> None:
+    hub = EventHub()
+    service = StreamService(hub)
+    first = service.open("build-1")
+    second = service.open("build-2")
+
+    service.close(first)
+    hub.publish("build-2", "running")
+
+    assert first.events == ()
+    assert second.events == ("running",)
+    assert hub.subscriber_count == 1
+
+
+def test_closed_stream_can_be_collected_while_an_active_stream_remains() -> None:
+    hub = EventHub()
+    service = StreamService(hub)
+    closed = service.open("closed")
+    active = service.open("active")
+    reference = weakref.ref(closed)
+
+    service.close(closed)
+    del closed
+    gc.collect()
+
+    assert reference() is None
+    assert service.active_count == 1
+    assert hub.subscriber_count == 1
+    hub.publish("active", "passed")
+    assert active.events == ("passed",)

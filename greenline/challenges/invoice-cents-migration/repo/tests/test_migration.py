@@ -93,3 +93,43 @@ def test_rerunning_completed_migration_is_safe_no_op(database: InvoiceDatabase) 
     first = database.invoice(7)
     assert runner.run_batch(10) == 0
     assert database.invoice(7) == first
+
+
+@pytest.mark.parametrize(
+    ("amount", "tax", "expected"),
+    [
+        ("0.00", "0.00", (0, 0, 0)),
+        ("1.00", "0.00", (100, 0, 100)),
+        ("1.01", "0.01", (100, 1, 101)),
+        ("19.99", "1.25", (1874, 125, 1999)),
+        ("1000000.00", "200000.00", (80000000, 20000000, 100000000)),
+    ],
+)
+def test_live_writes_preserve_exact_cents_for_boundary_amounts(
+    database: InvoiceDatabase,
+    amount: str,
+    tax: str,
+    expected: tuple[int, int, int],
+) -> None:
+    database.create_invoice(99, amount, tax)
+    row = database.invoice(99)
+    assert (row["subtotal_cents"], row["tax_cents"], row["total_cents"]) == expected
+
+
+@pytest.mark.parametrize("batch_size", [0, -1])
+def test_batch_size_must_be_positive(
+    database: InvoiceDatabase,
+    batch_size: int,
+) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        MigrationRunner(database).run_batch(batch_size)
+
+
+def test_backfill_uses_decimal_rounding_for_fractional_cents(
+    database: InvoiceDatabase,
+) -> None:
+    database.seed_legacy(1, "1.005", "0.005")
+
+    assert MigrationRunner(database).run_batch(1) == 1
+    row = database.invoice(1)
+    assert (row["subtotal_cents"], row["tax_cents"], row["total_cents"]) == (100, 1, 101)

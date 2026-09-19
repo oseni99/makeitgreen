@@ -30,3 +30,37 @@ test('does not mutate inputs or retain nested references', () => {
   assert.deepEqual(defaults, { feature: { enabled: true }, hosts: ['a'] })
   assert.deepEqual(overrides, { feature: { enabled: false }, hosts: ['b'] })
 })
+
+for (const [label, override] of [
+  ['false', false],
+  ['integer zero', 0],
+  ['negative zero', -0],
+  ['empty string', ''],
+  ['null', null],
+  ['empty array', []],
+]) {
+  test(`top-level ${label} explicitly replaces the default`, () => {
+    assert.deepEqual(mergeConfig({ value: 'default' }, { value: override }), {
+      value: override,
+    })
+  })
+}
+
+for (const [label, override] of [
+  ['false', false],
+  ['integer zero', 0],
+  ['negative zero', -0],
+  ['empty string', ''],
+  ['null', null],
+  ['empty array', []],
+]) {
+  test(`nested ${label} explicitly replaces the default`, () => {
+    assert.deepEqual(
+      mergeConfig(
+        { service: { value: 'default', keep: true } },
+        { service: { value: override } },
+      ),
+      { service: { value: override, keep: true } },
+    )
+  })
+}

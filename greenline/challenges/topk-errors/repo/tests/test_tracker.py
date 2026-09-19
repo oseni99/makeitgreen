@@ -53,3 +53,32 @@ def test_clearly_dominant_services_survive_noisy_stream() -> None:
     assert names == ["checkout", "payments"]
     assert tracker.tracked_services <= 16
     assert len(tracker._counts) <= 16
+
+
+@pytest.mark.parametrize(
+    ("k", "capacity", "cardinality"),
+    [
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 2, 4),
+        (2, 3, 10),
+        (3, 4, 25),
+        (3, 8, 100),
+        (4, 8, 500),
+        (5, 10, 1_000),
+        (5, 16, 2_000),
+        (10, 32, 5_000),
+    ],
+)
+def test_counter_storage_is_bounded_for_each_capacity_and_cardinality(
+    k: int,
+    capacity: int,
+    cardinality: int,
+) -> None:
+    tracker = ErrorTracker(k=k, capacity=capacity)
+    for number in range(cardinality):
+        tracker.ingest(f"service-{number}", "ERROR")
+
+    assert tracker.tracked_services <= capacity
+    assert len(tracker._counts) <= capacity
+    assert len(tracker.topk()) <= k

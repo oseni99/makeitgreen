@@ -50,3 +50,24 @@ def test_transfer_cannot_overdraft(svc: WalletService) -> None:
     assert svc.balance("alice") == 10_000, "failed transfer must not touch balances"
     assert svc.balance("bob") == 0
     assert svc.fees_collected == 0
+
+
+@pytest.mark.parametrize("amount", [1, 2, 25, 50, 99])
+def test_each_sub_dollar_transfer_charges_minimum_fee(
+    svc: WalletService,
+    amount: int,
+) -> None:
+    before = svc.balance("alice")
+    assert svc.transfer("alice", "bob", amount) == 1
+    assert svc.balance("alice") == before - amount - 1
+
+
+@pytest.mark.parametrize("amount", [9_902, 9_950, 9_998, 9_999, 10_000])
+def test_sender_must_cover_amount_plus_fee_without_partial_mutation(
+    svc: WalletService,
+    amount: int,
+) -> None:
+    before = (svc.balance("alice"), svc.balance("bob"), svc.fees_collected)
+    with pytest.raises(InsufficientFunds):
+        svc.transfer("alice", "bob", amount)
+    assert (svc.balance("alice"), svc.balance("bob"), svc.fees_collected) == before

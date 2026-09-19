@@ -1,5 +1,6 @@
 import importlib
 
+import pytest
 from fastapi.testclient import TestClient
 
 module = importlib.import_module("webhooks.app")
@@ -89,6 +90,81 @@ def test_conflicting_delivery_id_rejects_the_whole_batch() -> None:
         event("new", "b", 1, "running"),
         event("same", "a", 1, "failed"),
     ]})
+
+    assert response.status_code == 409
+    assert client.get("/devices/b").status_code == 404
+
+
+@pytest.mark.parametrize("future_sequence", [2, 3, 5])
+def test_each_future_sequence_waits_for_its_predecessors(future_sequence: int) -> None:
+    client = TestClient(module.app)
+
+    response = client.post(
+        "/webhooks/batch",
+        json={"events": [event("future", "device", future_sequence, "succeeded")]},
+    )
+
+    assert response.json() == {"statuses": ["deferred"], "applied_count": 0}
+    assert client.get("/devices/device").status_code == 404
+
+
+@pytest.mark.parametrize("stale_sequence", [0, 1])
+def test_each_stale_sequence_is_ignored_without_state_rollback(
+    stale_sequence: int,
+) -> None:
+    client = TestClient(module.app)
+    client.post(
+        "/webhooks/batch",
+        json={"events": [event("current", "device", 1, "running")]},
+    )
+
+    response = client.post(
+        "/webhooks/batch",
+        json={"events": [event("stale", "device", stale_sequence, "failed")]},
+    )
+
+    assert response.json() == {"statuses": ["stale"], "applied_count": 0}
+    assert client.get("/devices/device").json()["state"] == "running"
+
+
+@pytest.mark.parametrize(
+    "conflicting",
+    [
+        event("same", "a", 1, "failed"),
+        event("same", "b", 1, "running"),
+        event("same", "a", 2, "running"),
+    ],
+)
+def test_delivery_id_conflict_detects_each_fingerprint_field(
+    conflicting: dict,
+) -> None:
+    client = TestClient(module.app)
+    client.post(
+        "/webhooks/batch",
+        json={"events": [event("same", "a", 1, "running")]},
+    )
+
+    response = client.post("/webhooks/batch", json={"events": [conflicting]})
+
+    assert response.status_code == 409
+
+
+def test_conflict_late_in_batch_rolls_back_earlier_events() -> None:
+    client = TestClient(module.app)
+    client.post(
+        "/webhooks/batch",
+        json={"events": [event("same", "a", 1, "running")]},
+    )
+
+    response = client.post(
+        "/webhooks/batch",
+        json={
+            "events": [
+                event("new", "b", 1, "running"),
+                event("same", "a", 1, "failed"),
+            ]
+        },
+    )
 
     assert response.status_code == 409
     assert client.get("/devices/b").status_code == 404

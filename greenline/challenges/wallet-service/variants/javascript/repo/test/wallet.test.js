@@ -46,3 +46,21 @@ test('cannot overdraft and leaves failed transfers untouched', () => {
   assert.equal(wallet.balance('bob'), 0)
   assert.equal(wallet.feesCollected, 0)
 })
+
+for (const amount of [1, 2, 25, 50, 99]) {
+  test(`charges minimum fee for ${amount} cent transfer`, () => {
+    const wallet = service()
+    assert.equal(wallet.transfer('alice', 'bob', amount), 1)
+    assert.equal(wallet.balance('alice'), 10_000 - amount - 1)
+  })
+}
+
+for (const amount of [9_902, 9_950, 9_998, 9_999, 10_000]) {
+  test(`requires funds for ${amount} cent amount plus fee`, () => {
+    const wallet = service()
+    assert.throws(() => wallet.transfer('alice', 'bob', amount), InsufficientFunds)
+    assert.equal(wallet.balance('alice'), 10_000)
+    assert.equal(wallet.balance('bob'), 0)
+    assert.equal(wallet.feesCollected, 0)
+  })
+}

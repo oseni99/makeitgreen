@@ -60,6 +60,9 @@ the image contract.
 
 ## Run it
 
+For first-time installation, local authentication options, test commands, and
+troubleshooting, follow [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md).
+
 From the repository root, start both development servers with one command:
 
 ```bash
@@ -263,12 +266,12 @@ configuration uses Clerk with Google as the sole sign-in provider.
 1. Create `challenges/<slug>/challenge.json` (copy an existing one).
    Useful fields:
    - `order` — catalog sort key (lower first; default `999` if omitted)
-   - `minimum_tests` — minimum number of collected cases the solved suite must
-     pass. Medium challenges default to `15`.
-   - `maximum_pristine_pass_percent` — upper bound for the untouched starter's
-     passing percentage. Medium challenges default to `30`, and must remain
-     strictly below that percentage while retaining at least one passing
-     unrelated behavior.
+   - `minimum_tests` — optional stricter minimum for the solved suite. Every
+     challenge and language variant must collect and pass at least `15` cases.
+   - `maximum_pristine_pass_percent` — optional additional upper bound for the
+     untouched starter's passing percentage. Every starter must retain between
+     `1` and `5` passing cases; Medium challenges must also remain strictly
+     below `30%` unless this field sets a stricter threshold.
    - `readonly` — path prefixes the user cannot edit (default `["tests/"]`)
    - `creatable` — optional prefixes where the user may add new files
      (e.g. `["orders/"]`)
@@ -286,7 +289,9 @@ configuration uses Clerk with Google as the sole sign-in provider.
    case, the failing tests encode the spec.
 3. Put fixed files (same relative paths) + `SOLUTION.md` in `solution/`.
 4. Verify both states: the repo must fail, `repo/` + `solution/` overlay must pass
-   (`python scripts/validate_challenges.py` from `greenline/`).
+   (`python scripts/validate_challenges.py` from `greenline/`). Validation also
+   rejects imports unavailable in the production execution image, so a package
+   installed only in a developer environment cannot mask a hosted-run failure.
 
 To add another language to an existing concept, keep the default implementation
 in `repo/` and `solution/`, declare it in `variants`, and place its content in

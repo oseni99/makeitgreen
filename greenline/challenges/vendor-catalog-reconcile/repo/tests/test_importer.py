@@ -72,3 +72,56 @@ def test_only_truly_unidentifiable_rows_are_rejected() -> None:
     importer = CatalogImporter(MAPPINGS)
     with pytest.raises(UnidentifiableRow):
         importer.import_rows([row("internal", "i1", 1, description="No identity")])
+
+
+@pytest.mark.parametrize(
+    ("source", "identity_fields", "tax_field", "tax_value"),
+    [
+        ("internal", {"sku": "A"}, "tax_code", "standard"),
+        ("distributor", {"code": "A"}, "tax", "reduced"),
+        ("spreadsheet", {"vendor_sku": "A"}, "tax_class", "zero"),
+    ],
+)
+def test_tax_mapping_is_preserved_for_every_configured_source(
+    source: str,
+    identity_fields: dict,
+    tax_field: str,
+    tax_value: str,
+) -> None:
+    importer = CatalogImporter(MAPPINGS)
+    result = importer.import_rows(
+        [row(source, "source-1", 1, **identity_fields, **{tax_field: tax_value})]
+    )
+    assert result[0]["tax_code"] == tax_value
+
+
+@pytest.mark.parametrize(
+    ("first_sku", "second_sku"),
+    [("sku-1", "SKU-1"), (" sku-1 ", "SKU-1"), ("Sku-1", "sKu-1")],
+)
+def test_normalized_sku_identity_merges_records_across_sources(
+    first_sku: str,
+    second_sku: str,
+) -> None:
+    importer = CatalogImporter(MAPPINGS)
+    result = importer.import_rows(
+        [
+            row("internal", "i1", 1, sku=first_sku, description="First"),
+            row("distributor", "d1", 2, code=second_sku, label="Second"),
+        ]
+    )
+    assert len(result) == 1
+    assert result[0]["source_ids"] == ["distributor:d1", "internal:i1"]
+
+
+@pytest.mark.parametrize("stale_time", [0, 5, 9])
+def test_each_older_arrival_preserves_newer_field_versions(stale_time: int) -> None:
+    importer = CatalogImporter(MAPPINGS)
+    importer.import_rows(
+        [row("internal", "i1", 10, sku="A", description="Current")]
+    )
+    result = importer.import_rows(
+        [row("distributor", "d1", stale_time, code="A", label="Stale")]
+    )
+    assert len(result) == 1
+    assert result[0]["description"] == "Current"

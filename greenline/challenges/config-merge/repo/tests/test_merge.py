@@ -1,3 +1,5 @@
+import pytest
+
 from config_service.merge import merge_config
 
 
@@ -22,3 +24,18 @@ def test_inputs_are_not_mutated() -> None:
     merge_config(defaults, overrides)
     assert defaults == {"feature": {"enabled": True}}
     assert overrides == {"feature": {"enabled": False}}
+
+
+@pytest.mark.parametrize("override", [False, 0, 0.0, "", None, []])
+def test_each_explicit_falsey_top_level_value_replaces_default(override: object) -> None:
+    assert merge_config({"value": "default"}, {"value": override}) == {
+        "value": override
+    }
+
+
+@pytest.mark.parametrize("override", [False, 0, 0.0, "", None, []])
+def test_each_explicit_falsey_nested_value_replaces_default(override: object) -> None:
+    assert merge_config(
+        {"service": {"value": "default", "keep": True}},
+        {"service": {"value": override}},
+    ) == {"service": {"value": override, "keep": True}}

@@ -107,3 +107,40 @@ def test_credit_can_reduce_invoice_to_zero_without_gateway_call() -> None:
     assert result.receipt.amount_cents == 0
     assert gateway.charges == []
     assert repository.get("sub-1").credit_cents == 100
+
+
+@pytest.mark.parametrize(
+    ("unit_price", "seats", "discount", "credit", "expected"),
+    [
+        (100, 1, 0, 0, 100),
+        (999, 1, 0, 0, 999),
+        (500, 2, 10, 0, 900),
+        (500, 3, 20, 100, 1100),
+        (250, 4, 25, 50, 700),
+        (1000, 1, 100, 0, 0),
+        (1000, 1, 50, 500, 0),
+        (1000, 2, 50, 250, 750),
+    ],
+)
+def test_exact_due_boundary_uses_discount_then_credit_for_pricing_matrix(
+    unit_price: int,
+    seats: int,
+    discount: int,
+    credit: int,
+    expected: int,
+) -> None:
+    _, gateway, service = setup_subscription(
+        unit_price_cents=unit_price,
+        seats=seats,
+        discount_percent=discount,
+        credit_cents=credit,
+    )
+
+    result = service.renew("sub-1", "matrix", DUE)
+
+    assert result.renewed is True
+    assert result.receipt is not None
+    assert result.receipt.amount_cents == expected
+    assert [charge["amount_cents"] for charge in gateway.charges] == (
+        [] if expected == 0 else [expected]
+    )

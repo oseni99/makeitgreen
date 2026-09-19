@@ -6,6 +6,7 @@ absolute path. Discovers challenges next to this script's parent directory.
 """
 from __future__ import annotations
 
+import ast
 import json
 import math
 import re
@@ -26,9 +27,21 @@ PYTEST_CONFIG_FILES = {
 TIMEOUT_SECONDS = 60
 VARIANT_SEPARATOR = "@"
 VARIANT_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+CATALOG_MINIMUM_TESTS = 15
+CATALOG_MAXIMUM_PRISTINE_PASSED = 5
 
 CHALLENGES_DIR = Path(__file__).resolve().parent.parent / "challenges"
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+PYTHON_EXECUTION_REQUIREMENTS = (
+    BACKEND_DIR / "execution-images" / "python" / "requirements.txt"
+)
+REQUIREMENT_IMPORT_NAMES = {
+    "pytest": "pytest",
+    "pytest-json-report": "pytest_jsonreport",
+    "fastapi": "fastapi",
+    "httpx": "httpx",
+    "pydantic": "pydantic",
+}
 
 
 class ProtectedSolutionPath(ValueError):
@@ -81,9 +94,11 @@ def validate_documented_field_types(meta: dict[str, object]) -> None:
     if "minimum_tests" in meta and (
         isinstance(minimum_tests, bool)
         or not isinstance(minimum_tests, int)
-        or minimum_tests < 1
+        or minimum_tests < CATALOG_MINIMUM_TESTS
     ):
-        raise ValueError("minimum_tests must be a positive integer")
+        raise ValueError(
+            f"minimum_tests must be an integer of at least {CATALOG_MINIMUM_TESTS}"
+        )
     maximum_pass_percent = meta.get("maximum_pristine_pass_percent")
     if "maximum_pristine_pass_percent" in meta and (
         isinstance(maximum_pass_percent, bool)
@@ -270,6 +285,94 @@ def run_suite(
     return _run_command(resolved, workdir)
 
 
+def execution_image_imports() -> set[str]:
+    """Return Python import roots explicitly supplied by the execution image."""
+    names: set[str] = set()
+    for raw_line in PYTHON_EXECUTION_REQUIREMENTS.read_text(encoding="utf-8").splitlines():
+        requirement = raw_line.partition("#")[0].strip()
+        if not requirement:
+            continue
+        package = re.split(r"[<>=!~\[]", requirement, maxsplit=1)[0].strip().lower()
+        import_name = REQUIREMENT_IMPORT_NAMES.get(package)
+        if import_name is not None:
+            names.add(import_name)
+    return names
+
+
+def unsupported_python_imports(
+    repo: Path,
+    *,
+    creatable: object = None,
+) -> set[str]:
+    """Find imports unavailable in stdlib, the repo, or the execution image."""
+    local_roots = {path.stem for path in repo.glob("*.py")}
+    local_roots.update(path.name for path in repo.iterdir() if path.is_dir())
+    if isinstance(creatable, list):
+        for prefix in creatable:
+            if not isinstance(prefix, str):
+                continue
+            parts = Path(prefix.rstrip("/")).parts
+            if parts:
+                local_roots.add(Path(parts[0]).stem)
+    allowed = set(sys.stdlib_module_names) | local_roots | execution_image_imports()
+    unsupported: set[str] = set()
+    for source in repo.rglob("*.py"):
+        if any(part in IGNORED for part in source.parts):
+            continue
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            # The actual test command reports syntax/read failures with better context.
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots = {alias.name.partition(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                roots = {node.module.partition(".")[0]}
+            else:
+                continue
+            unsupported.update(roots - allowed)
+    return unsupported
+
+
+def unsupported_node_imports(repo: Path) -> set[str]:
+    """Find bare Node imports; the execution image contains no npm packages."""
+    patterns = (
+        re.compile(r"\brequire\s*\(\s*['\"]([^'\"]+)['\"]"),
+        re.compile(r"\bfrom\s*['\"]([^'\"]+)['\"]"),
+        re.compile(r"\bimport\s*['\"]([^'\"]+)['\"]"),
+        re.compile(r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]"),
+    )
+    unsupported: set[str] = set()
+    for source in (
+        path
+        for suffix in ("*.js", "*.mjs", "*.cjs")
+        for path in repo.rglob(suffix)
+    ):
+        if any(part in IGNORED for part in source.parts):
+            continue
+        try:
+            content = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for pattern in patterns:
+            for specifier in pattern.findall(content):
+                if not specifier.startswith((".", "/", "node:")):
+                    unsupported.add(specifier)
+    return unsupported
+
+
+def unsupported_runtime_imports(
+    repo: Path,
+    *,
+    runtime_kind: str,
+    creatable: object = None,
+) -> set[str]:
+    if runtime_kind == "node":
+        return unsupported_node_imports(repo)
+    return unsupported_python_imports(repo, creatable=creatable)
+
+
 def copy_repo(src: Path, dest: Path) -> None:
     shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*IGNORED))
 
@@ -348,16 +451,15 @@ def passed_test_count(output: str) -> int | None:
     return counts[0] if counts is not None else None
 
 
-def quality_thresholds(meta: dict[str, object]) -> tuple[int | None, int | float | None]:
-    minimum_tests = meta.get("minimum_tests")
+def quality_thresholds(meta: dict[str, object]) -> tuple[int, int | float | None]:
+    minimum_tests = meta.get("minimum_tests", CATALOG_MINIMUM_TESTS)
     maximum_pass_percent = meta.get("maximum_pristine_pass_percent")
     if meta.get("difficulty") == "Medium":
-        minimum_tests = minimum_tests if minimum_tests is not None else 15
         maximum_pass_percent = (
             maximum_pass_percent if maximum_pass_percent is not None else 30
         )
     return (
-        minimum_tests if isinstance(minimum_tests, int) else None,
+        minimum_tests if isinstance(minimum_tests, int) else CATALOG_MINIMUM_TESTS,
         maximum_pass_percent
         if isinstance(maximum_pass_percent, (int, float))
         else None,
@@ -385,13 +487,35 @@ def validate_challenge(slug: str) -> bool:
         print(_fail("   solution : skipped (no repo/)"))
         return False
 
+    try:
+        meta = _variant_metadata(challenge, selected_variant)
+        runtime = meta.get("runtime") or {}
+        runtime_kind = runtime.get("kind", "python") if isinstance(runtime, dict) else "python"
+        if runtime_kind == "python" and (
+            isinstance(runtime, dict) and runtime.get("requirements")
+        ):
+            print(_ok("   packages : challenge uses its declared isolated environment"))
+        else:
+            unsupported = unsupported_runtime_imports(
+                repo, runtime_kind=runtime_kind, creatable=meta.get("creatable")
+            )
+            if unsupported:
+                names = ", ".join(sorted(unsupported))
+                print(_fail(f"   packages : unavailable in {runtime_kind} execution image: {names}"))
+                print(_fail("   solution : skipped (unsupported package import)"))
+                return False
+            print(_ok(f"   packages : imports available in {runtime_kind} execution image"))
+    except (OSError, ValueError) as exc:
+        print(_fail(f"   packages : {exc}"))
+        print(_fail("   solution : skipped (package audit failed)"))
+        return False
+
     passed = True
     with tempfile.TemporaryDirectory(prefix=f"greenline-validate-{slug}-") as tmp:
         tmpdir = Path(tmp)
         pristine = tmpdir / "pristine"
         copy_repo(repo, pristine)
         try:
-            meta = _variant_metadata(challenge, selected_variant)
             exit_code, output = (
                 run_suite(challenge, pristine)
                 if selected_variant is None
@@ -403,31 +527,41 @@ def validate_challenge(slug: str) -> bool:
         if exit_code == 1:
             print(_ok(f"   pristine : exit {exit_code}  (expected fail)"))
             _minimum_tests, maximum_pass_percent = quality_thresholds(meta)
-            if maximum_pass_percent is not None:
-                counts = test_outcome_counts(output)
-                if counts is None:
-                    print(_fail("   starting : could not read pristine test counts"))
+            counts = test_outcome_counts(output)
+            if counts is None:
+                print(_fail("   starting : could not read pristine test counts"))
+                passed = False
+            else:
+                passed_tests, total_tests = counts
+                actual_percent = passed_tests / total_tests * 100
+                constraints = (
+                    f"must be 1-{CATALOG_MAXIMUM_PRISTINE_PASSED} passed"
+                )
+                if maximum_pass_percent is not None:
+                    constraints += f" and < {maximum_pass_percent:g}%"
+                label = (
+                    f"   starting : {passed_tests}/{total_tests} pass"
+                    f"  ({actual_percent:.1f}%; {constraints})"
+                )
+                if passed_tests == 0:
+                    print(
+                        _fail(
+                            f"{label}; pristine suite must retain at least one"
+                            " passing behavior"
+                        )
+                    )
+                    passed = False
+                elif passed_tests > CATALOG_MAXIMUM_PRISTINE_PASSED:
+                    print(_fail(label))
+                    passed = False
+                elif (
+                    maximum_pass_percent is not None
+                    and actual_percent >= maximum_pass_percent
+                ):
+                    print(_fail(label))
                     passed = False
                 else:
-                    passed_tests, total_tests = counts
-                    actual_percent = passed_tests / total_tests * 100
-                    label = (
-                        f"   starting : {passed_tests}/{total_tests} pass"
-                        f"  ({actual_percent:.1f}%, must be < {maximum_pass_percent:g}%)"
-                    )
-                    if passed_tests == 0:
-                        print(
-                            _fail(
-                                f"{label}; pristine suite must retain at least one"
-                                " passing behavior"
-                            )
-                        )
-                        passed = False
-                    elif actual_percent >= maximum_pass_percent:
-                        print(_fail(label))
-                        passed = False
-                    else:
-                        print(_ok(label))
+                    print(_ok(label))
         else:
             print(_fail(f"   pristine : exit {exit_code}  (expected test-failure exit 1)"))
             print(_tail(output))
@@ -440,6 +574,14 @@ def validate_challenge(slug: str) -> bool:
         except ProtectedSolutionPath as exc:
             print(_fail(f"   solution : protected path {exc}"))
             return False
+        if not (runtime_kind == "python" and isinstance(runtime, dict) and runtime.get("requirements")):
+            unsupported = unsupported_runtime_imports(
+                overlaid, runtime_kind=runtime_kind, creatable=meta.get("creatable")
+            )
+            if unsupported:
+                names = ", ".join(sorted(unsupported))
+                print(_fail(f"   solution : imports unavailable in {runtime_kind} execution image: {names}"))
+                return False
         exit_code, output = (
             run_suite(challenge, overlaid)
             if selected_variant is None
@@ -448,26 +590,25 @@ def validate_challenge(slug: str) -> bool:
         if exit_code == 0:
             print(_ok("   solution : exit 0  (expected pass)"))
             minimum_tests, _maximum_pass_percent = quality_thresholds(meta)
-            if minimum_tests is not None:
-                actual_tests = passed_test_count(output)
-                if actual_tests is None:
-                    print(_fail("   coverage : could not read solved test count"))
-                    passed = False
-                elif actual_tests < minimum_tests:
-                    print(
-                        _fail(
-                            f"   coverage : {actual_tests} tests"
-                            f"  (minimum {minimum_tests})"
-                        )
+            actual_tests = passed_test_count(output)
+            if actual_tests is None:
+                print(_fail("   coverage : could not read solved test count"))
+                passed = False
+            elif actual_tests < minimum_tests:
+                print(
+                    _fail(
+                        f"   coverage : {actual_tests} tests"
+                        f"  (minimum {minimum_tests})"
                     )
-                    passed = False
-                else:
-                    print(
-                        _ok(
-                            f"   coverage : {actual_tests} tests"
-                            f"  (minimum {minimum_tests})"
-                        )
+                )
+                passed = False
+            else:
+                print(
+                    _ok(
+                        f"   coverage : {actual_tests} tests"
+                        f"  (minimum {minimum_tests})"
                     )
+                )
         else:
             print(_fail(f"   solution : exit {exit_code}  (expected pass)"))
             print(_tail(output))

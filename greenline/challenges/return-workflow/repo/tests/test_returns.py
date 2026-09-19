@@ -82,14 +82,35 @@ def test_unknown_and_duplicate_returns_have_distinct_errors() -> None:
     with pytest.raises(DuplicateReturn):
         service.open_return("ret-6")
 
-
-def test_listing_is_stable_and_does_not_expose_history() -> None:
-    service = ReturnService()
     service.open_return("ret-b")
     service.open_return("ret-a")
     service.transition("ret-b", "authorized")
-
     assert service.list_returns() == [
+        {"id": "ret-6", "state": "requested"},
         {"id": "ret-a", "state": "requested"},
         {"id": "ret-b", "state": "authorized"},
     ]
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        (["authorized"], "refunded"),
+        (["authorized", "received"], "refunded"),
+        (["authorized", "received", "inspected", "refunded"], "cancelled"),
+        (["authorized", "received", "inspected", "rejected"], "cancelled"),
+    ],
+)
+def test_additional_skips_and_terminal_transitions_are_atomic_no_ops(
+    path: list[str], target: str
+) -> None:
+    service = ReturnService()
+    service.open_return("ret-extra")
+    for state in path:
+        service.transition("ret-extra", state)
+    before = service.history("ret-extra")
+
+    with pytest.raises(InvalidTransition):
+        service.transition("ret-extra", target)
+
+    assert service.history("ret-extra") == before

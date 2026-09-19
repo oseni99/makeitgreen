@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+
 from flags.models import GateDefinition, Rule
 from flags.service import GateService
 from flags.store import GateStore
@@ -128,3 +130,40 @@ def test_evaluation_does_not_mutate_definition_or_context() -> None:
     evaluate(gate, context)
     assert gate == gate_before
     assert context == context_before
+
+
+def test_zero_and_full_rollout_percentages_are_exact_boundaries() -> None:
+    context = {"workspace_id": "workspace-a"}
+    disabled = GateDefinition("zero", "production", rollout_percentage=0)
+    enabled = GateDefinition("full", "production", rollout_percentage=100)
+    assert evaluate(disabled, context).value is False
+    assert evaluate(enabled, context).value is True
+
+
+def test_allowlist_requires_only_workspace_identity() -> None:
+    gate = GateDefinition(
+        "pilot", "production", allowlist=frozenset({"workspace-a"})
+    )
+    result = evaluate(gate, {"workspace_id": "workspace-a"})
+    assert (result.value, result.reason) == (True, "allowlist")
+
+
+def test_unsupported_rule_operator_is_rejected() -> None:
+    gate = GateDefinition(
+        "bad-rule",
+        "production",
+        rules=(Rule("bad", "plan", "contains", "team", True),),
+    )
+    with pytest.raises(ValueError, match="unsupported"):
+        evaluate(gate, {"workspace_id": "workspace-a", "plan": "team"})
+
+
+@pytest.mark.parametrize("expected", ["team", {"team": True}])
+def test_membership_rule_rejects_string_and_mapping_collections(expected: object) -> None:
+    gate = GateDefinition(
+        "membership",
+        "production",
+        rules=(Rule("member", "plan", "in", expected, True),),
+    )
+    result = evaluate(gate, {"workspace_id": "workspace-a", "plan": "team"})
+    assert (result.value, result.reason) == (False, "default")

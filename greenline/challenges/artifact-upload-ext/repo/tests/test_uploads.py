@@ -107,3 +107,39 @@ def test_empty_artifact_is_valid_and_input_is_validated() -> None:
     session_id = upload.begin("empty", 0, digest(b""))
     artifact_id = upload.finalize(session_id, [])
     assert artifact_id == f"sha256:{digest(b'')}"
+
+
+@pytest.mark.parametrize("number", [0, -1])
+def test_chunk_numbers_must_be_positive(number: int) -> None:
+    upload = service()
+    session_id = upload.begin("x", 1, digest(b"x"))
+    with pytest.raises(ValueError, match="positive"):
+        upload.put_chunk(session_id, number, b"x", digest(b"x"))
+
+
+def test_full_file_digest_failure_keeps_session_correctable() -> None:
+    from uploads import IntegrityError
+
+    upload = service()
+    session_id = upload.begin("x", 3, digest(b"abd"))
+    upload.put_chunk(session_id, 1, b"abc", digest(b"abc"))
+    with pytest.raises(IntegrityError, match="digest"):
+        upload.finalize(session_id, [1])
+    assert upload.status(session_id) == {"received": [1], "bytes_received": 3}
+
+
+def test_status_reports_chunks_in_canonical_order() -> None:
+    upload = service()
+    session_id = upload.begin("x", 3, digest(b"abc"))
+    upload.put_chunk(session_id, 3, b"c", digest(b"c"))
+    upload.put_chunk(session_id, 1, b"a", digest(b"a"))
+    upload.put_chunk(session_id, 2, b"b", digest(b"b"))
+    assert upload.status(session_id) == {"received": [1, 2, 3], "bytes_received": 3}
+
+
+def test_unknown_session_is_rejected() -> None:
+    from uploads import UploadNotFound
+
+    upload = service()
+    with pytest.raises(UploadNotFound):
+        upload.status("missing")

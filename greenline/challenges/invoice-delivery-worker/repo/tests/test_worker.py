@@ -124,3 +124,74 @@ def test_two_workers_racing_duplicate_message_produce_one_effect() -> None:
     assert sink.processed_message_ids == {"msg-1"}
     assert queue.pending == 0
     assert queue.inflight == 0
+
+
+@pytest.mark.parametrize("start", [0, 10, 100])
+def test_first_transient_failure_schedules_one_second_after_current_time(
+    start: int,
+) -> None:
+    queue = InMemoryQueue()
+    sink = DeliverySink({"inv-1": 1})
+    clock = FakeClock(start)
+    queue.publish(command())
+
+    assert Worker(queue, sink, clock).run_one() is True
+    assert queue.next_ready_at() == start + 1
+    assert queue.inflight == 0
+
+
+@pytest.mark.parametrize("failure_count", [5, 6, 10])
+def test_retry_budget_parks_after_exactly_five_attempts(
+    failure_count: int,
+) -> None:
+    queue = InMemoryQueue()
+    sink = DeliverySink({"inv-1": failure_count})
+    clock = FakeClock(0)
+    queue.publish(command())
+    worker = Worker(queue, sink, clock)
+
+    for ready_at in (0, 1, 3, 7, 15):
+        clock.advance(ready_at - clock.now())
+        assert worker.run_one() is True
+
+    assert queue.pending == 0
+    assert queue.inflight == 0
+    assert len(queue.parked) == 1
+    assert queue.parked[0].attempt == 5
+
+
+@pytest.mark.parametrize("copies", [2, 4])
+def test_sequential_duplicate_messages_produce_one_effect(copies: int) -> None:
+    queue = InMemoryQueue()
+    sink = DeliverySink()
+    clock = FakeClock()
+    for _ in range(copies):
+        queue.publish(command())
+
+    worker = Worker(queue, sink, clock)
+    for _ in range(copies):
+        assert worker.run_one() is True
+
+    assert len(sink.deliveries) == 1
+    assert sink.processed_message_ids == {"msg-1"}
+
+
+def test_redelivery_after_crash_acknowledges_the_duplicate_without_repeating_effect() -> None:
+    queue = InMemoryQueue()
+    sink = DeliverySink()
+    clock = FakeClock()
+    queue.publish(command("message", "invoice"))
+
+    with pytest.raises(RuntimeError):
+        Worker(
+            queue,
+            sink,
+            clock,
+            after_delivery=lambda: (_ for _ in ()).throw(RuntimeError("crash")),
+        ).run_one()
+
+    queue.redeliver_inflight()
+    assert Worker(queue, sink, clock).run_one() is True
+    assert len(sink.deliveries) == 1
+    assert queue.pending == 0
+    assert queue.inflight == 0
