@@ -357,6 +357,7 @@ export default function Workspace() {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
   const [restoringRunId, setRestoringRunId] = useState<number | null>(null)
   const [restoreError, setRestoreError] = useState('')
+  const [solutionAccessError, setSolutionAccessError] = useState('')
   const [newPath, setNewPath] = useState('')
   const [fileOpError, setFileOpError] = useState('')
   /** Narrow viewports: side panel toggled; desktop CSS ignores this. */
@@ -887,6 +888,7 @@ export default function Workspace() {
   const alreadyOpen = solved || !!challenge.progress.spoiled
 
   async function handleSolutionNav(e: React.MouseEvent) {
+    setSolutionAccessError('')
     if (dirty.size > 0 && !window.confirm('You have unsaved changes. Leave anyway?')) {
       e.preventDefault()
       return
@@ -903,7 +905,7 @@ export default function Workspace() {
       const { progress } = await api.spoil(slug)
       setChallenge((ch) => (ch ? { ...ch, progress } : ch))
     } catch {
-      window.alert('Could not record spoil — try again.')
+      setSolutionAccessError('Could not unlock the solution. Your progress was not changed. Try again.')
       return
     }
     if (dirty.size > 0) skipUnsavedRef.current = true
@@ -1018,6 +1020,15 @@ export default function Workspace() {
           </div>
         </div>
       </div>
+
+      {solutionAccessError && (
+        <div
+          className="shrink-0 border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-sm text-destructive md:px-6"
+          role="alert"
+        >
+          {solutionAccessError}
+        </div>
+      )}
 
       {solved && (
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-success/20 bg-success/10 px-4 py-2 text-sm text-success md:px-6">

@@ -269,6 +269,7 @@ export default function Solution() {
   const [error, setError] = useState(false)
   const [gated, setGated] = useState(false)
   const [spoiling, setSpoiling] = useState(false)
+  const [spoilError, setSpoilError] = useState('')
   const [compareMode, setCompareMode] = useState<CompareMode>('broken')
   const [solved, setSolved] = useState(false)
   const [debrief, setDebrief] = useState<Debrief | null>(null)
@@ -342,11 +343,12 @@ export default function Solution() {
 
   async function confirmSpoil() {
     setSpoiling(true)
+    setSpoilError('')
     try {
       await api.spoil(slug)
     } catch {
       setSpoiling(false)
-      window.alert('Could not record spoil — try again.')
+      setSpoilError('Could not unlock the solution. Your progress was not changed. Try again.')
       return
     }
     try {
@@ -394,6 +396,11 @@ export default function Solution() {
               Back
             </Link>
           </div>
+          {spoilError && (
+            <p className="mt-4 text-sm text-destructive" role="alert">
+              {spoilError}
+            </p>
+          )}
         </div>
       </main>
     )

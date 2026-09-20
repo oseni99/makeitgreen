@@ -14,6 +14,8 @@ import {
 } from '../src/editorDiagnostics'
 import { WorkspaceRoute } from '../src/pages/KeyedRoutes'
 
+vi.mock('../src/monacoSetup', () => ({}))
+
 const editorHarness = vi.hoisted(() => {
   const listeners = new Set<() => void>()
   const model = {

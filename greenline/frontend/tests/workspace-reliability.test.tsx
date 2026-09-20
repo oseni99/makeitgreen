@@ -8,6 +8,8 @@ import { WorkspaceRoute } from '../src/pages/KeyedRoutes'
 import { formatRunFailureOutput } from '../src/runFailure'
 import viteConfig from '../vite.config'
 
+vi.mock('../src/monacoSetup', () => ({}))
+
 const editorHarness = vi.hoisted(() => ({
   save: null as null | (() => Promise<void>),
 }))
@@ -73,6 +75,7 @@ function installServer({
   failSecondFile = false,
   includeNewFile = false,
   includeVariants = false,
+  spoilFails = false,
   runResult = {},
   streamBeforeComplete = false,
   historyRuns = [],
@@ -80,6 +83,7 @@ function installServer({
   failSecondFile?: boolean
   includeNewFile?: boolean
   includeVariants?: boolean
+  spoilFails?: boolean
   runResult?: Record<string, unknown>
   streamBeforeComplete?: boolean
   historyRuns?: Array<Record<string, unknown>>
@@ -97,6 +101,11 @@ function installServer({
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     const method = init?.method ?? 'GET'
     if (url.endsWith('/runs') && method === 'GET') return json({ runs: historyRuns })
+    if (url.endsWith('/spoil') && method === 'POST') {
+      return spoilFails
+        ? json({ detail: 'temporary failure' }, 503)
+        : json({ progress: { status: 'todo', attempts: 0, spoiled: true } })
+    }
     if (url.endsWith('/runs') && method === 'POST') {
       runNumber += 1
       return json({ job_id: `job-${runNumber}`, slug: 'orders-service', status: 'queued' })
@@ -235,6 +244,22 @@ afterEach(() => {
 })
 
 describe('workspace reliability', () => {
+  it('keeps the learner in the workspace and explains when solution access fails', async () => {
+    installServer({ spoilFails: true })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderWorkspace()
+    await screen.findByDisplayValue('original source')
+
+    await user.click(screen.getByRole('link', { name: 'Solution' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not unlock the solution. Your progress was not changed. Try again.',
+    )
+    expect(screen.getByRole('textbox', { name: 'code editor' })).toBeTruthy()
+    confirm.mockRestore()
+  })
+
   it('replaces the current history entry when switching challenge languages', async () => {
     installServer({ includeVariants: true })
     const user = userEvent.setup()

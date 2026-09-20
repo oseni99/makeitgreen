@@ -1,6 +1,6 @@
 # MakeItGreen — Known Gaps & Improvement Backlog
 
-**Last reconciled with the codebase:** 2026-09-10
+**Last reconciled with the codebase and invited production beta:** 2026-09-20
 
 **Audience:** an agent (or engineer) picking up work on this codebase with no prior context.
 Read `README.md` first for architecture and how to run. This document is the honest,
@@ -18,41 +18,55 @@ PRs), so features that increase
 *interview realism* (timers, structured results, more challenge types) matter more than
 generic SaaS features (billing, growth tooling). The AI mock interviewer (gap 4 / #11)
 is parked — do not pick it up unless the owner reopens it. Authentication and tenant
-isolation are still mandatory gates before production hosting (gap 7), even though they
-are not the next interview-prep feature.
+isolation remain mandatory boundaries (gap 7), even though they are not the next
+interview-prep feature.
 
-**Stack:** FastAPI backend (`backend/`), Vite + React + TS + Monaco frontend
-(`frontend/`), file-system challenge content (`challenges/<slug>/{challenge.json,repo/,solution/}`),
-SQLite progress. Backend runs on :8000, frontend dev server on :5173 with `/api` proxy.
+**Stack:** FastAPI backend (`backend/`), Vite + React + TypeScript + Monaco frontend
+(`frontend/`), and file-system challenge content
+(`challenges/<slug>/{challenge.json,repo/,solution/}`). Local Mode uses SQLite and
+filesystem workspaces. Hosted Mode uses PostgreSQL, a separate control-plane/app host,
+and a separate execution-worker host. During local development the backend runs on
+:8000 and Vite runs on :5173 with an `/api` proxy.
 
 **Verified:** the full loop works end-to-end (catalog → workspace → red run → edit →
 green run → solved state → solution page). A jsdom React integration test now drives
-that behavioral practice loop through the real route tree and mocked HTTP boundary. All 49 challenges
-validate both ways (broken repo fails, solution overlay passes) via
+that behavioral practice loop through the real route tree and mocked HTTP boundary. All
+49 challenge concepts and 55 language variants validate both ways (broken repo fails,
+solution overlay passes) via
 `scripts/validate_challenges.py`.
-The backend currently has 247 passing platform tests covering composition/readiness,
+The backend platform suites cover composition/readiness,
 authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
 challenge overlays, and API contracts. The current frontend passes `npm test`,
-`npm run lint`, and `npm run build`; its 34 tests comprise four dependency-free Node
-checks plus 30 Vitest checks covering configured authentication, the design system,
-the practice loop, editor failure navigation, and reliable checkpoint restoration. CI is
+`npm run lint`, and `npm run build`; its 44 tests comprise four dependency-free Node
+checks plus 40 Vitest checks covering configured authentication, the design system,
+the practice loop, editor failure navigation, checkpoint restoration, route recovery,
+and solution-access failure handling. CI is
 `.github/workflows/greenline.yml`.
+
+The invited production beta is live at `makeitgreen.dev`. Its app, PostgreSQL, Caddy,
+and worker containers have been deployed on separate hosts; public health checks report
+the exact release and a matching live worker; and authenticated Python challenge runs
+have completed through the hosted queue. This proves the core release works. It does
+not yet prove automated recovery, public-scale capacity, or unattended operations.
 
 ## Open work at a glance
 
 | Priority | Work | Why now |
 |---|---|---|
-| Now | Deployment operations and capacity evidence | The owner reviewed the architecture; separate app/execution hosts and the G-1 through G-10 evidence remain |
-| Next | Operated beta validation | Run the named cohort/burst staging probe, close the launch gates, then observe real queue and learning-loop behavior |
+| Now | Recovery, monitoring, and capacity evidence | The invited beta works, but off-host backups, restore drills, external alerts, durable logs, and named capacity probes remain |
+| Next | Staging acceptance and host deployment automation | Exercise the real built containers before production and deploy exact digests to both hosts without a manual SSH session |
+| Next | Browser, accessibility, and dependency verification | Add real-browser acceptance, keyboard/mobile checks, and triage the current dependency audit findings |
+| Later | Workspace maintainability | Decompose the large workspace page only after browser-level behavior is protected |
 | Beta validation | Observe path → run → solve → debrief → return conversion | Begin once a safely operated beta can collect real usage |
 | Later | Retention practice and weekly publishing workflow | Evaluate after the beta learning loop has real usage |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
 
-The local-first feature backlog is complete. The active engineering track is production
-readiness, but the service must not receive untrusted public traffic until every remaining
-hosting gate is implemented and exercised.
+The local-first feature backlog is complete and the invite-only beta is deployed. Keep
+access invite-only; do not open anonymous or unrestricted public access until the
+remaining recovery, monitoring, staging, and capacity gates are implemented and
+exercised.
 
 ## Current backend safety baseline (do not regress)
 
@@ -294,11 +308,17 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   under `deploy/`. The validator rejects a public database bind, mutable images,
   mismatched shared policy, a Docker socket in the application trust zone, and Clerk
   credentials in the worker trust zone.
-- **Remaining deployment gate:** do not expose the service to untrusted users yet.
-  The live deployment must still provide secret delivery/rotation, direct-port
-  network isolation, edge DDoS limits, a JSON-log collector with concrete alert rules,
-  durable audit export, backup/restore drills, separate application/database and
-  execution hosts, and measured capacity evidence.
+- **Current hosted state:** an invite-only production beta is running with separate
+  application/database and execution-worker hosts, TLS at Caddy, private PostgreSQL
+  binding, no public worker API, digest-pinned images, and Clerk-gated access. The core
+  hosted Python run path has been exercised successfully. This is an operated beta,
+  not evidence that the system is ready for unrestricted public traffic.
+- **Remaining public-launch gates:** implement and exercise secret rotation,
+  collector-backed JSON logs with concrete alert rules, durable audit export,
+  off-host backups and clean-host restore drills, registry retention, external uptime
+  and host-resource monitoring, staging acceptance, automated host deployment, and
+  measured capacity evidence. Reconfirm direct-port and edge limits as part of the
+  launch review rather than assuming the one-time deployment checks remain true.
 - **Capacity baseline implemented:** one active run per learner is the fail-closed
   default, global queued/running capacity remains independently bounded, per-host worker
   concurrency stays configurable, and container memory is configurable with a validated
@@ -395,13 +415,29 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   brief/files panel as an absolute overlay. Tailwind's `hidden` / `flex`
   utilities control its collapsed and open states. Opening a file auto-hides it.
 
+### 13a. ~~Editor loading and native error alerts~~ — CLOSED
+
+- **Editor loading:** workspace and solution use explicit React lazy boundaries with
+  branded loading fallbacks. `main.tsx` no longer imports Monaco during application startup, so landing,
+  sign-in, catalog, and profile do not download the editor implementation. The
+  production entry chunk fell from roughly 4.4 MB to roughly 481 KB before gzip;
+  Monaco and its workers remain editor-only asynchronous assets.
+- **Monaco scope:** the local ESM editor API is configured explicitly with the basic
+  language, JSON, and TypeScript/JavaScript contributions required by the current
+  challenge catalog. CSS and HTML language-service workers are no longer emitted when
+  the product does not expose those language services.
+- **Product-native failure state:** spoil/unlock failures in Workspace and Solution no
+  longer invoke `window.alert`. They keep the learner on the current page and render a
+  restrained, accessible `role="alert"` message explaining that progress was not
+  changed. Behavior tests cover both entry points.
+
 ---
 
 ## P3 — engineering hygiene
 
 ### 14. ~~Platform test coverage~~ — CLOSED
 
-- **Implemented:** 247 backend tests now also cover composition/readiness,
+- **Implemented:** backend tests cover composition/readiness,
   authentication, tenant isolation, `progress.py` (attempts, sticky
   `solved_at`, non-downgrade, reset, concurrent SQLite, spoiled), `runner.py`
   (green/red/no-tests, stdout+stderr, truncation, container isolation policy), `challenges.py`
@@ -455,9 +491,14 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   timeout or unhealthy rollout. Runnable-manifest identity is checked between scanned
   images and attested archives, and the release records are attested. No promotion or
   rollback rebuilds an image.
+- **Live invited beta:** the control plane, Caddy, and PostgreSQL run on the app host;
+  the execution worker and Docker daemon run on a separate worker host. Production
+  health and exact-release checks pass, and an authenticated hosted challenge run has
+  completed. Host rollout is still a manual operator procedure: moving registry tags
+  is not yet sufficient to update the running hosts automatically.
 - **Still current:** Local Mode uses SQLite + filesystem state under `backend/data/`.
-  Production deployment-platform secret rotation, direct-port network isolation, an external log
-  collector/alerts, durable audit export, backup/restore policy and drills, registry
+  Production deployment-platform secret rotation, continuous network-boundary
+  verification, an external log collector/alerts, durable audit export, backup/restore policy and drills, registry
   retention policy, the hosting platform's tag-watcher/deployment-controller
   configuration, permanent external release-record export, live deployment evidence,
   and real-host capacity evidence remain missing.
@@ -492,6 +533,51 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   `frontend/public/og-makeitgreen.png` asset. Production may replace the root-relative
   URL with the final canonical absolute URL at deploy time.
 
+### 18. Current fine-tuning gaps — OPEN
+
+#### 18a. Real-browser staging acceptance
+
+The React/jsdom practice-loop tests protect page orchestration but replace Monaco and
+the HTTP boundary. Image smoke tests protect process composition but do not drive a
+real browser. Add a small acceptance suite against the built control-plane and worker
+images, then point the same suite at staging. It must cover at least sign-in, direct
+workspace URLs, Python and JavaScript execution, partial output arriving before process
+exit, terminal structured results, history/checkpoint restore, reset, and gated solution
+access. This is the regression boundary for differences between local development and
+the deployed system.
+
+#### 18b. Recovery and observability
+
+The beta has health endpoints and documented recovery principles, but scheduled
+off-host PostgreSQL backups, a successful clean-host restore drill, external uptime and
+resource alerts, searchable durable logs, and durable audit export are not yet proven.
+Do not treat the existence of a health endpoint or a backup command as evidence that an
+operator will be notified or that data can be restored.
+
+#### 18c. Accessibility and responsive browser verification
+
+The UI has semantic labels, focus styles, mobile layout branches, and accessible status
+messages, but the full practice loop has not been verified with keyboard-only use, a
+screen reader, or representative mobile browsers. Pay particular attention to Monaco,
+editor tabs, the file panel overlay, output resizing, run history, confirmations, and
+focus restoration after navigation or errors.
+
+#### 18d. Dependency security review
+
+The current frontend install reports 19 npm audit findings (1 low, 14 moderate, 4
+high). Audit whether each affected package reaches production, identify patched
+versions and breaking changes, and update deliberately. Do not run a broad forced audit
+fix that can silently change React, Vite, Monaco, Clerk, or the testing stack.
+
+#### 18e. Workspace maintainability
+
+`frontend/src/pages/Workspace.tsx` is roughly 1,400 lines and owns data loading,
+autosave, navigation blocking, timer state, editor integration, run polling, output,
+history, checkpoint restoration, and most workspace presentation. Once real-browser
+acceptance protects the loop, extract cohesive components and hooks without changing
+the learner workflow. This is a maintainability improvement, not justification for a
+rewrite.
+
 ---
 
 ## Suggested execution order
@@ -502,15 +588,25 @@ run checkpoints, the first three content batches and Node challenges, learning
 tracks/cadence, and the social-preview asset are implemented and tested.
 
 The owner-reviewed production architecture is documented in
-[`THREAT_MODEL.md`](THREAT_MODEL.md): manual copying remains an accepted invite-only beta
-limitation, while untrusted execution must use hosts separate from the application and
-database. Close launch gates G-1 through G-10 with durable evidence, including the
-named 15/50/100-learner cohort/burst capacity probe and its explicit queue-start SLOs.
-Finalize direct-port
-isolation, secret rotation, collector-backed security alerts, durable audit export,
-backup/restore drills, registry retention, deployment-controller configuration, and
-permanent release-record export. Only after those controls are implemented and exercised
-should the hosted beta accept untrusted traffic and begin measuring the learning funnel.
+[`THREAT_MODEL.md`](THREAT_MODEL.md). The invite-only beta now uses the required
+separation between the application/database host and execution host. Manual host rollout
+remains an accepted beta limitation; registry promotion is not yet host deployment.
+
+Work next in this order:
+
+1. Add real-browser acceptance against built containers and the future staging
+   environment, covering sign-in, Python and JavaScript runs, streamed output, history,
+   reset, and solution access.
+2. Close launch gates G-1 through G-10 with durable evidence: off-host backup and clean
+   restore, external uptime/resource alerts, durable logs and audit export, secret
+   rotation, registry retention, and the named 15/50/100-learner capacity probes.
+3. Automate exact-digest host deployment only after staging can accept or reject the
+   same release artifact production would receive.
+4. Run keyboard, screen-reader, mobile-browser, and dependency-security audits.
+5. Decompose `Workspace.tsx` after the browser acceptance suite protects its behavior.
+
+Only after those controls are implemented and exercised should the service move from
+invite-only access to unrestricted public traffic.
 
 This table tracks the currently identified backlog, including minor items; it is a
 living inventory rather than a guarantee that no further work will be discovered.
@@ -534,11 +630,11 @@ gap 14 foundation and frontend behavioral coverage.
 | 9 | Platform tests + content validation CI foundation (gap 14) | S–M | Compounding | ✅ done |
 | 10 | Streaming runs + per-challenge venvs (gaps 8, 6) | L | Medium | ✅ done |
 | 11 | AI interviewer (gap 4) | L | Parked — owner said skip for now | ⏸ deferred |
-| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks hosting | ◐ architecture reviewed; deployment and capacity evidence next |
+| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks public launch | ◐ invite-only beta live; recovery, monitoring, automation, and capacity evidence remain |
 | 13 | Multiple editor tabs (gap 12) | S–M | Medium | ✅ done |
 | 14 | Cmd+S save + "saved" indicator (gap 12) | S | Medium | ✅ done |
 | 15 | Unsaved-changes guard on navigation (gap 12) | S | Medium | ✅ done |
-| 16 | Cross-file search within a challenge (gap 12) | M | Medium (explore phase) | ✅ done |
+| 16 | Cross-file search within a challenge (gap 12) | M | Low after product review | ⛔ intentionally removed; file tree is the supported navigation model |
 | 17 | Solution spoiler-gating + `spoiled` progress flag (gap 10) | S | Medium (incentives) | ✅ done |
 | 18 | Diff user's workspace vs reference solution (gap 11 bonus) | S | Medium | ✅ done |
 | 19 | Error/retry UI states when backend is down (gap 13) | S | Medium | ✅ done |
@@ -552,9 +648,17 @@ gap 14 foundation and frontend behavioral coverage.
 | 27 | Meta description + Open Graph tags (gap 17) | XS | Low | ✅ done; project image tracked in row 30 |
 | 28 | Structured-result jump marker + first-open reveal polish (gap 2 follow-up) | S | Medium (failure navigation) | ✅ done |
 | 29 | Content parity expansion: Tier 3, second language, release cadence, and track guide (gap 9) | L | High (catalog depth) | ✅ done (`subscription-renew`, `webhook-batch-node`, guides) |
-| 30 | Add and host an `og:image` social-preview asset (gap 17 follow-up) | XS | Low | ✅ project asset done; canonical absolute URL waits for production domain |
-| 31 | Frontend behavioral practice-loop component/browser coverage (gap 14) | M | High (regression confidence) | ✅ done (React/jsdom integration) |
+| 30 | Add and host an `og:image` social-preview asset (gap 17 follow-up) | XS | Low | ✅ project asset done; canonical absolute URL remains a deployment follow-up |
+| 31 | Frontend behavioral practice-loop component coverage (gap 14) | M | High (regression confidence) | ✅ done (React/jsdom integration); real browser coverage is row 35 |
 | 32 | Revalidate persisted workspace overlays before copying them into a run (gap 7 local safety) | S | High (execution policy) | ✅ done |
+| 33 | Lazy-load editor routes and defer Monaco | S | High (initial-load performance) | ✅ done; entry chunk reduced from ~4.4 MB to ~481 KB before gzip |
+| 34 | Replace native spoil-failure alerts | XS | Medium (recovery UX) | ✅ done; accessible inline states cover Workspace and Solution |
+| 35 | Real-browser staging acceptance suite | M–L | High (production confidence) | ☐ next |
+| 36 | Off-host backups, restore drill, external monitoring, and durable logs | L | Critical (recoverability) | ☐ now |
+| 37 | Keyboard, screen-reader, and mobile-browser audit | M | Medium–High | ☐ next |
+| 38 | Triage frontend dependency audit findings | S–M | Medium (supply-chain hygiene) | ☐ next; do not apply blind automated upgrades |
+| 39 | Decompose `Workspace.tsx` behind behavior tests | M | Medium (maintainability) | ☐ later |
+| 40 | Reconcile this backlog with current beta state | S | High (planning accuracy) | ✅ done 2026-09-20 |
 
 **Conventions to preserve:** challenge validation discipline (both states verified);
 tests and pytest control files are enforced read-only by the backend (the UI flag is
