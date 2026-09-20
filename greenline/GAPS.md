@@ -423,10 +423,11 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   production entry chunk fell from roughly 4.4 MB to roughly 481 KB before gzip;
   Monaco and its workers remain editor-only asynchronous assets.
 - **Monaco scope:** the local ESM editor API keeps lightweight syntax tokenization for
-  the current challenge languages and the JSON language contribution. CSS, HTML, and
-  TypeScript/JavaScript language-service workers are no longer emitted. JavaScript still
-  receives syntax highlighting, while the challenge test suite remains the authority for
-  correctness instead of Monaco's TypeScript-powered diagnostics and IntelliSense.
+  Python, JavaScript, TypeScript/TSX, and Markdown plus the JSON language contribution.
+  Other basic languages are not registered or emitted. CSS, HTML, and TypeScript/JavaScript
+  language-service workers are also absent. JavaScript still receives syntax highlighting,
+  while the challenge test suite remains the authority for correctness instead of Monaco's
+  TypeScript-powered diagnostics and IntelliSense.
 - **Product-native failure state:** spoil/unlock failures in Workspace and Solution no
   longer invoke `window.alert`. They keep the learner on the current page and render a
   restrained, accessible `role="alert"` message explaining that progress was not
