@@ -44,7 +44,7 @@ it('opens the product profile directly without another menu', () => {
   expect(screen.getByRole('link', { name: 'Open profile' }).getAttribute('href')).toBe('/profile')
 })
 
-it('shows learner identity, progress, prep path, and the next challenge', async () => {
+it('shows learner identity, progress, and the next challenge from the saved prep path', async () => {
   const user = userEvent.setup()
   vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_example')
   vi.stubGlobal(
@@ -53,9 +53,6 @@ it('shows learner identity, progress, prep path, and the next challenge', async 
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const method = init?.method ?? 'GET'
       if (url === '/api/me/preferences' && method === 'GET') return json({ prep_path: 'distributed' })
-      if (url === '/api/me/activity') {
-        return json({ solves: [{ slug: 'wallet-service', solved_at: new Date().toISOString() }] })
-      }
       if (url === '/api/challenges') {
         return json({
           challenges: [
@@ -120,11 +117,14 @@ it('shows learner identity, progress, prep path, and the next challenge', async 
   )
 
   expect(await screen.findByRole('heading', { name: 'Oluwatosin Oseni' })).toBeTruthy()
-  expect(screen.getByText('Distributed correctness')).toBeTruthy()
-  const activity = screen.getByRole('group', { name: 'Daily solve activity' })
-  expect(activity.children).toHaveLength(182)
-  expect(screen.getByLabelText(/1 challenge solved/)).toBeTruthy()
-  expect(screen.getByText('1 solved · 2 in progress · 0 remaining')).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Continue practicing' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Progress' })).toBeTruthy()
+  expect(screen.getByRole('group', { name: '1 completed' })).toBeTruthy()
+  expect(screen.getByRole('group', { name: '2 in progress' })).toBeTruthy()
+  expect(screen.queryByRole('progressbar')).toBeNull()
+  expect(screen.queryByText('Remaining')).toBeNull()
+  expect(screen.queryByRole('group', { name: 'Daily solve activity' })).toBeNull()
+  expect(screen.queryByText('Prep path')).toBeNull()
   expect(screen.getByRole('link', { name: 'Open challenge' }).getAttribute('href')).toBe(
     '/c/orders-service@javascript',
   )
