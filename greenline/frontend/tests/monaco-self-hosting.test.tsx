@@ -9,17 +9,12 @@ vi.mock('@monaco-editor/react', () => ({
 vi.mock('monaco-editor/editor/editor.api', () => localMonaco)
 vi.mock('monaco-editor/basic-languages/monaco.contribution', () => ({}))
 vi.mock('monaco-editor/language/json/monaco.contribution', () => ({}))
-vi.mock('monaco-editor/language/typescript/monaco.contribution', () => ({}))
 
 class EditorWorker {}
 class JsonWorker {}
-class TypeScriptWorker {}
 
 vi.mock('monaco-editor/editor/editor.worker?worker', () => ({ default: EditorWorker }))
 vi.mock('monaco-editor/language/json/json.worker?worker', () => ({ default: JsonWorker }))
-vi.mock('monaco-editor/language/typescript/ts.worker?worker', () => ({
-  default: TypeScriptWorker,
-}))
 
 it('uses the bundled Monaco instance and bundled language workers', async () => {
   await import('../src/monacoSetup')
@@ -28,6 +23,7 @@ it('uses the bundled Monaco instance and bundled language workers', async () => 
 
   const environment = self.MonacoEnvironment
   expect(environment?.getWorker?.('', 'json')).toBeInstanceOf(JsonWorker)
-  expect(environment?.getWorker?.('', 'javascript')).toBeInstanceOf(TypeScriptWorker)
+  expect(environment?.getWorker?.('', 'javascript')).toBeInstanceOf(EditorWorker)
+  expect(environment?.getWorker?.('', 'typescript')).toBeInstanceOf(EditorWorker)
   expect(environment?.getWorker?.('', 'python')).toBeInstanceOf(EditorWorker)
 })
