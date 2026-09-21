@@ -123,7 +123,7 @@ function installPracticeLoopServer() {
     }
     if (url === '/api/challenges/orders-service/solution' && method === 'GET') {
       return json({
-        writeup: '# Atomic checkout',
+        writeup: '# Atomic checkout\n\n## Root cause\n\nThe reservation is not atomic.',
         files: [
           {
             path: 'orders/service.py',
@@ -204,10 +204,28 @@ describe('practice loop', () => {
     )
 
     await user.click(screen.getByRole('link', { name: /compare with the reference solution/i }))
-    expect(await screen.findByRole('heading', { name: 'Reference solution' })).toBeTruthy()
-    expect(await screen.findByText('Atomic checkout')).toBeTruthy()
+    expect(
+      await screen.findByRole('heading', { name: 'orders-service — official fix' }),
+    ).toBeTruthy()
+    expect(await screen.findByText('The reservation is not atomic.')).toBeTruthy()
+    expect(screen.queryByText('Atomic checkout')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'The fix' })).toBeTruthy()
+    expect(screen.getByText('1 file changed')).toBeTruthy()
+    expect(screen.getAllByText('+1')).toHaveLength(2)
+    expect(screen.getAllByText('−1')).toHaveLength(2)
+    expect(screen.getByText('Starter code')).toBeTruthy()
+    expect(screen.getByText('Official solution')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'broken' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'fixed' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /your work/i })).toBeNull()
     await waitFor(() => expect(screen.getByLabelText('solution diff')).toBeTruthy())
 
+    await user.click(screen.getByRole('button', { name: 'collapse' }))
+    expect(screen.queryByLabelText('solution diff')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'expand' }))
+    await waitFor(() => expect(screen.getByLabelText('solution diff')).toBeTruthy())
+
+    await user.click(screen.getByRole('button', { name: 'Add reflection' }))
     await user.type(screen.getByLabelText('What was the root cause?'), 'A check-write race.')
     await user.type(screen.getByLabelText('Why does the fix work?'), 'The mutation is atomic.')
     await user.type(

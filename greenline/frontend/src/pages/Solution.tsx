@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import {
   api,
   isAbortError,
-  isNotFoundError,
+  type ChallengeDetail,
   type Debrief,
   type Solution as SolutionData,
 } from '../api'
@@ -16,8 +16,36 @@ import { defineGreenlineTheme } from '../monacoTheme'
 import { Button } from '@/components/ui/button'
 import { buttonVariants } from '@/components/ui/button-variants'
 
-type FileView = 'diff' | 'left' | 'right'
-type CompareMode = 'broken' | 'yours'
+interface ChangeCount {
+  additions: number
+  deletions: number
+}
+
+function withoutLeadingTitle(markdown: string): string {
+  return markdown.replace(/^\s*#\s+[^\n]+\n+/, '')
+}
+
+function lineChanges(before: string, after: string): ChangeCount {
+  const beforeLines = before === '' ? [] : before.split('\n')
+  const afterLines = after === '' ? [] : after.split('\n')
+  let previous = new Uint32Array(afterLines.length + 1)
+
+  for (const beforeLine of beforeLines) {
+    const current = new Uint32Array(afterLines.length + 1)
+    for (let index = 1; index <= afterLines.length; index += 1) {
+      current[index] = beforeLine === afterLines[index - 1]
+        ? previous[index - 1] + 1
+        : Math.max(previous[index], current[index - 1])
+    }
+    previous = current
+  }
+
+  const unchanged = previous[afterLines.length]
+  return {
+    additions: afterLines.length - unchanged,
+    deletions: beforeLines.length - unchanged,
+  }
+}
 
 function editorHeight(fixed: string, original: string): number {
   const lines = Math.max(fixed.split('\n').length, original.split('\n').length)
@@ -36,88 +64,122 @@ function FileBlock({
   path,
   fixed,
   original,
-  userContent,
-  compareMode,
+  changeCount,
+  defaultExpanded,
 }: {
   path: string
   fixed: string
   original: string
-  userContent: string | null
-  compareMode: CompareMode
+  changeCount: ChangeCount
+  defaultExpanded: boolean
 }) {
-  const [view, setView] = useState<FileView>('diff')
-  const missingYours = compareMode === 'yours' && userContent === null
-  const left = compareMode === 'yours' ? (userContent ?? '') : original
-  const leftLabel = compareMode === 'yours' ? 'yours' : 'broken'
-  const height = editorHeight(fixed, left)
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  const height = editorHeight(fixed, original)
   const language = useMonacoLanguage(editorLanguage(path))
 
-  const leftSource =
-    compareMode === 'yours'
-      ? missingYours
-        ? '(not in your workspace)'
-        : left
-      : original || '(file did not exist in original)'
-
   return (
-    <section className="mt-10 overflow-hidden rounded-lg border bg-card">
-      <div className="flex flex-wrap items-center gap-3 border-b bg-muted/60 px-4 py-3 text-sm">
-        <span className="font-mono font-semibold text-foreground">{path}</span>
-        {missingYours && <span className="text-xs text-muted-foreground">not in your workspace</span>}
-        <div className="ml-auto flex gap-1">
-          {([
-            ['diff', 'diff'],
-            ['left', leftLabel],
-            ['right', 'fixed'],
-          ] as const).map(([key, label]) => (
-            <Button
-              key={key}
-              type="button"
-              variant={view === key ? 'primary' : 'ghost'}
-              size="sm"
-              className="min-h-8 rounded-md px-3 text-xs"
-              onClick={() => setView(key)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      </div>
-      {view === 'diff' && language ? (
-        <div className="bg-console" style={{ height }}>
-          <DiffEditor
-            key={compareMode}
-            original={left}
-            modified={fixed}
-            language={language}
-            beforeMount={defineGreenlineTheme}
-            theme="greenline"
-            options={{
-              readOnly: true,
-              renderSideBySide: true,
-              fontSize: 12.5,
-              fontFamily: "'IBM Plex Mono', monospace",
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              renderOverviewRuler: false,
-              hideUnchangedRegions: { enabled: true },
-            }}
-          />
-        </div>
-      ) : view === 'diff' ? (
-        <div
-          className="grid bg-console font-mono text-xs text-console-muted"
-          role="status"
-          style={{ height }}
+    <section className="mt-3 overflow-hidden rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+        <span className="min-w-0 truncate font-mono font-semibold text-foreground">{path}</span>
+        <span className="text-xs font-semibold text-success">+{changeCount.additions}</span>
+        <span className="text-xs font-semibold text-destructive">−{changeCount.deletions}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto min-h-8 px-2.5 text-xs text-muted-foreground"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
         >
-          <span className="place-self-center">Preparing diff…</span>
+          {expanded ? 'collapse' : 'expand'}
+        </Button>
+      </div>
+      {expanded && (
+        <div>
+          <div className="grid grid-cols-2 border-y bg-muted/60 px-4 py-2.5 text-xs font-semibold text-muted-foreground">
+            <span>Starter code</span>
+            <span className="pl-3">Official solution</span>
+          </div>
+          {language ? (
+            <div className="bg-console" style={{ height }}>
+              <DiffEditor
+                original={original}
+                modified={fixed}
+                language={language}
+                beforeMount={defineGreenlineTheme}
+                theme="greenline"
+                options={{
+                  readOnly: true,
+                  renderSideBySide: true,
+                  fontSize: 12.5,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  renderOverviewRuler: false,
+                  hideUnchangedRegions: { enabled: true },
+                }}
+              />
+            </div>
+          ) : (
+            <div
+              className="grid bg-console font-mono text-xs text-console-muted"
+              role="status"
+              style={{ height }}
+            >
+              <span className="place-self-center">Preparing diff…</span>
+            </div>
+          )}
         </div>
-      ) : (
-        <pre className="m-0 max-h-[480px] overflow-auto bg-console p-5 font-mono text-[12.5px] leading-7 text-console-foreground">
-          {view === 'right' ? fixed : leftSource}
-        </pre>
       )}
     </section>
+  )
+}
+
+function SolutionHeader({
+  challenge,
+  slug,
+}: {
+  challenge: ChallengeDetail | null
+  slug: string
+}) {
+  const variants = challenge?.variants?.length
+    ? challenge.variants
+    : challenge
+      ? [{ language: challenge.language, slug: challenge.slug }]
+      : []
+
+  return (
+    <header>
+      <Link to={`/c/${slug}`} className="text-sm text-muted-foreground hover:text-foreground">
+        ← back to workspace
+      </Link>
+      <h1 className="mt-5 text-[clamp(2rem,5vw,2.5rem)] font-bold leading-[1.1] tracking-[-0.025em]">
+        {challenge?.title ?? slug} <span className="text-muted-foreground">— official fix</span>
+      </h1>
+      {variants.length > 1 && (
+        <nav className="mt-4 flex flex-wrap gap-2" aria-label="Solution language">
+          {variants.map((variant) => {
+            const selected = variant.slug === slug
+            return (
+              <Link
+                key={variant.slug}
+                to={`/c/${variant.slug}/solution`}
+                aria-current={selected ? 'page' : undefined}
+                className={buttonVariants({
+                  variant: selected ? 'primary' : 'utility',
+                  size: 'sm',
+                })}
+              >
+                {variant.language}
+              </Link>
+            )
+          })}
+        </nav>
+      )}
+      <p className="mt-4 max-w-2xl text-[15px] leading-6 text-muted-foreground">
+        Use this to compare your approach after attempting the problem.
+      </p>
+    </header>
   )
 }
 
@@ -130,6 +192,7 @@ function DebriefCard({ slug, initial }: { slug: string; initial: Debrief | null 
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(Boolean(initial))
   const [error, setError] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   function changed() {
     setSaved(false)
@@ -164,155 +227,149 @@ function DebriefCard({ slug, initial }: { slug: string; initial: Debrief | null 
     'mt-2 min-h-[76px] w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-shadow placeholder:text-muted-foreground focus:ring-2 focus:ring-ring'
 
   return (
-    <section className="mt-14 rounded-xl border bg-card p-6 md:p-8">
-      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-        Close the loop
-      </p>
-      <h2 className="mt-2 text-2xl font-bold tracking-[-0.02em]">What changed?</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-        Capture the explanation you would give an interviewer. Short answers are enough.
-      </p>
+    <section className="mt-12 border-t pt-8" aria-labelledby="reflection-heading">
+      <div className="flex flex-wrap items-center gap-4">
+        <div>
+          <h2 id="reflection-heading" className="text-xl font-bold tracking-[-0.015em]">
+            Reflection
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Capture how you would explain the repair in an interview.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="utility"
+          size="sm"
+          className="ml-auto"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Hide reflection' : initial ? 'Review reflection' : 'Add reflection'}
+        </Button>
+      </div>
 
-      <form className="mt-7 grid gap-6" onSubmit={(event) => void submit(event)}>
-        <label className="text-sm font-semibold">
-          What was the root cause?
-          <textarea
-            className={fieldClass}
-            value={rootCause}
-            maxLength={1000}
-            required
-            onChange={(event) => {
-              setRootCause(event.target.value)
-              changed()
-            }}
-          />
-        </label>
-        <label className="text-sm font-semibold">
-          Why does the fix work?
-          <textarea
-            className={fieldClass}
-            value={fixReasoning}
-            maxLength={1000}
-            required
-            onChange={(event) => {
-              setFixReasoning(event.target.value)
-              changed()
-            }}
-          />
-        </label>
-        <label className="text-sm font-semibold">
-          What tradeoff did it introduce?
-          <textarea
-            className={fieldClass}
-            value={tradeoff}
-            maxLength={1000}
-            required
-            onChange={(event) => {
-              setTradeoff(event.target.value)
-              changed()
-            }}
-          />
-        </label>
-
-        <div className="border-t pt-6">
-          <p className="text-sm font-semibold">Was this challenge useful?</p>
-          <div className="mt-3 flex gap-2">
-            <Button
-              type="button"
-              variant={useful === true ? 'primary' : 'utility'}
-              size="sm"
-              aria-pressed={useful === true}
-              onClick={() => {
-                setUseful(true)
-                changed()
-              }}
-            >
-              Yes
-            </Button>
-            <Button
-              type="button"
-              variant={useful === false ? 'primary' : 'utility'}
-              size="sm"
-              aria-pressed={useful === false}
-              onClick={() => {
-                setUseful(false)
-                changed()
-              }}
-            >
-              Not really
-            </Button>
-          </div>
-          <label className="mt-5 block text-sm font-semibold">
-            Anything we should improve? <span className="font-normal text-muted-foreground">Optional</span>
+      {expanded && (
+        <form className="mt-7 grid gap-6" onSubmit={(event) => void submit(event)}>
+          <label className="text-sm font-semibold">
+            What was the root cause?
             <textarea
               className={fieldClass}
-              value={feedback}
+              value={rootCause}
               maxLength={1000}
+              required
               onChange={(event) => {
-                setFeedback(event.target.value)
+                setRootCause(event.target.value)
                 changed()
               }}
             />
           </label>
-        </div>
+          <label className="text-sm font-semibold">
+            Why does the fix work?
+            <textarea
+              className={fieldClass}
+              value={fixReasoning}
+              maxLength={1000}
+              required
+              onChange={(event) => {
+                setFixReasoning(event.target.value)
+                changed()
+              }}
+            />
+          </label>
+          <label className="text-sm font-semibold">
+            What tradeoff did it introduce?
+            <textarea
+              className={fieldClass}
+              value={tradeoff}
+              maxLength={1000}
+              required
+              onChange={(event) => {
+                setTradeoff(event.target.value)
+                changed()
+              }}
+            />
+          </label>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="primary" disabled={saving}>
-            {saving ? 'Saving…' : initial ? 'Update debrief' : 'Save debrief'}
-          </Button>
-          {saved && <span className="text-sm font-medium text-success">Saved</span>}
-          {error && (
-            <span className="text-sm text-destructive" role="alert">
-              {useful === null ? 'Choose whether this was useful.' : 'Could not save. Try again.'}
-            </span>
-          )}
-        </div>
-      </form>
+          <div className="border-t pt-6">
+            <p className="text-sm font-semibold">Was this challenge useful?</p>
+            <div className="mt-3 flex gap-2">
+              <Button
+                type="button"
+                variant={useful === true ? 'primary' : 'utility'}
+                size="sm"
+                aria-pressed={useful === true}
+                onClick={() => {
+                  setUseful(true)
+                  changed()
+                }}
+              >
+                Yes
+              </Button>
+              <Button
+                type="button"
+                variant={useful === false ? 'primary' : 'utility'}
+                size="sm"
+                aria-pressed={useful === false}
+                onClick={() => {
+                  setUseful(false)
+                  changed()
+                }}
+              >
+                Not really
+              </Button>
+            </div>
+            <label className="mt-5 block text-sm font-semibold">
+              Anything we should improve?{' '}
+              <span className="font-normal text-muted-foreground">Optional</span>
+              <textarea
+                className={fieldClass}
+                value={feedback}
+                maxLength={1000}
+                onChange={(event) => {
+                  setFeedback(event.target.value)
+                  changed()
+                }}
+              />
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" variant="primary" disabled={saving}>
+              {saving ? 'Saving…' : initial ? 'Update debrief' : 'Save debrief'}
+            </Button>
+            {saved && <span className="text-sm font-medium text-success">Saved</span>}
+            {error && (
+              <span className="text-sm text-destructive" role="alert">
+                {useful === null ? 'Choose whether this was useful.' : 'Could not save. Try again.'}
+              </span>
+            )}
+          </div>
+        </form>
+      )}
     </section>
   )
 }
 
 export default function Solution() {
   const { slug = '' } = useParams()
+  const [challenge, setChallenge] = useState<ChallengeDetail | null>(null)
   const [solution, setSolution] = useState<SolutionData | null>(null)
-  const [userFiles, setUserFiles] = useState<Record<string, string | null>>({})
   const [error, setError] = useState(false)
   const [gated, setGated] = useState(false)
   const [spoiling, setSpoiling] = useState(false)
   const [spoilError, setSpoilError] = useState('')
-  const [compareMode, setCompareMode] = useState<CompareMode>('broken')
   const [solved, setSolved] = useState(false)
   const [debrief, setDebrief] = useState<Debrief | null>(null)
   const [debriefLoaded, setDebriefLoaded] = useState(false)
 
-  const loadUserFiles = useCallback(
-    async (sol: SolutionData, signal?: AbortSignal) => {
-      const entries = await Promise.all(
-        sol.files.map(async (f) => {
-          try {
-            const content = await api.getFile(slug, f.path, { signal })
-            return [f.path, content] as const
-          } catch (err) {
-            if (isAbortError(err)) throw err
-            if (isNotFoundError(err)) return [f.path, null] as const
-            throw err
-          }
-        }),
-      )
-      if (signal?.aborted) return
-      setUserFiles(Object.fromEntries(entries))
-    },
-    [slug],
-  )
-
   const reveal = useCallback(
     async (signal?: AbortSignal) => {
       const sol = await api.getSolution(slug, { signal })
-      await loadUserFiles(sol, signal)
       if (signal?.aborted) return
       setSolution(sol)
     },
-    [slug, loadUserFiles],
+    [slug],
   )
 
   const load = useCallback(
@@ -320,6 +377,7 @@ export default function Solution() {
       try {
         const detail = await api.getChallenge(slug, { signal })
         if (signal?.aborted) return
+        setChallenge(detail)
         const challengeSolved = detail.progress.status === 'solved'
         setSolved(challengeSolved)
         if (detail.progress.status !== 'solved' && !detail.progress.spoiled) {
@@ -386,11 +444,8 @@ export default function Solution() {
   }
   if (gated) {
     return (
-      <main className="mx-auto max-w-[920px] px-6 py-14 md:px-10 md:py-20">
-        <Link to={`/c/${slug}`} className="text-sm text-muted-foreground hover:text-foreground">
-          ← back to workspace
-        </Link>
-        <h1 className="mt-6 text-[clamp(2.5rem,5vw,3.375rem)] font-bold leading-none tracking-[-0.035em]">Reference solution</h1>
+      <main className="mx-auto max-w-[1180px] px-6 py-12 md:px-10 md:py-16">
+        <SolutionHeader challenge={challenge} slug={slug} />
         <div className="mt-8 rounded-lg border bg-card p-7">
           <p className="mb-5 text-muted-foreground">Viewing the solution marks this challenge as spoiled — attempt it first?</p>
           <div className="flex flex-wrap gap-3">
@@ -417,48 +472,58 @@ export default function Solution() {
   }
   if (!solution) return <PageLoading label="Loading solution…" />
 
+  const fileChanges = solution.files.map((file) => ({
+    ...file,
+    changeCount: lineChanges(file.original, file.content),
+  }))
+  const additions = fileChanges.reduce((total, file) => total + file.changeCount.additions, 0)
+  const deletions = fileChanges.reduce((total, file) => total + file.changeCount.deletions, 0)
+
   return (
-    <main className="mx-auto max-w-[920px] px-6 py-14 md:px-10 md:py-20">
-      <Link to={`/c/${slug}`} className="text-sm text-muted-foreground hover:text-foreground">
-        ← back to workspace
-      </Link>
-      <div className="mt-6 flex flex-wrap items-end justify-between gap-5">
-        <h1 className="text-[clamp(2.5rem,5vw,3.375rem)] font-bold leading-none tracking-[-0.035em]">Reference solution</h1>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant={compareMode === 'broken' ? 'primary' : 'utility'}
-            size="sm"
-            className="rounded-full px-4"
-            onClick={() => setCompareMode('broken')}
-          >
-            broken → fixed
-          </Button>
-          <Button
-            type="button"
-            variant={compareMode === 'yours' ? 'primary' : 'utility'}
-            size="sm"
-            className="rounded-full px-4"
-            onClick={() => setCompareMode('yours')}
-          >
-            yours → fixed
-          </Button>
+    <main className="mx-auto max-w-[1180px] px-6 py-12 md:px-10 md:py-16">
+      <SolutionHeader challenge={challenge} slug={slug} />
+
+      <section className="mt-10 max-w-[820px]" aria-labelledby="solution-walkthrough-heading">
+        <h2
+          id="solution-walkthrough-heading"
+          className="text-xs font-semibold uppercase tracking-[0.0078rem] text-muted-foreground"
+        >
+          Solution walkthrough
+        </h2>
+        <div className="prose-greenline mt-4">
+          <ReactMarkdown>{withoutLeadingTitle(solution.writeup)}</ReactMarkdown>
         </div>
+      </section>
+
+      <section className="mt-12" aria-labelledby="solution-fix-heading">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4">
+          <h2 id="solution-fix-heading" className="text-2xl font-bold tracking-[-0.02em]">
+            The fix
+          </h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm text-muted-foreground">
+              {fileChanges.length} {fileChanges.length === 1 ? 'file' : 'files'} changed
+            </span>
+            <span className="text-sm font-semibold text-success">+{additions}</span>
+            <span className="text-sm font-semibold text-destructive">−{deletions}</span>
+          </div>
+        </div>
+
+        {fileChanges.map((file, index) => (
+          <FileBlock
+            key={file.path}
+            path={file.path}
+            fixed={file.content}
+            original={file.original}
+            changeCount={file.changeCount}
+            defaultExpanded={index === 0}
+          />
+        ))}
+      </section>
+
+      <div className="max-w-[820px]">
+        {solved && debriefLoaded && <DebriefCard slug={slug} initial={debrief} />}
       </div>
-      <div className="prose-greenline mt-12">
-        <ReactMarkdown>{solution.writeup}</ReactMarkdown>
-      </div>
-      {solution.files.map((f) => (
-        <FileBlock
-          key={f.path}
-          path={f.path}
-          fixed={f.content}
-          original={f.original}
-          userContent={Object.hasOwn(userFiles, f.path) ? userFiles[f.path] : null}
-          compareMode={compareMode}
-        />
-      ))}
-      {solved && debriefLoaded && <DebriefCard slug={slug} initial={debrief} />}
     </main>
   )
 }

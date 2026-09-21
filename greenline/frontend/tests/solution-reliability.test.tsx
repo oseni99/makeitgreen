@@ -58,5 +58,5 @@ it('shows an in-product error when a gated solution cannot be unlocked', async (
   expect((await screen.findByRole('alert')).textContent).toBe(
     'Could not unlock the solution. Your progress was not changed. Try again.',
   )
-  expect(screen.getByRole('heading', { name: 'Reference solution' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'orders-service — official fix' })).toBeTruthy()
 })
