@@ -77,6 +77,20 @@ def test_catalog_lists_challenges_with_progress(isolated_api: Path) -> None:
     assert items[1]["progress"]["status"] == "todo"
 
 
+def test_catalog_exposes_server_phase_timings(isolated_api: Path) -> None:
+    _create_challenge(isolated_api, "demo")
+
+    response = TestClient(api.app).get("/api/challenges")
+
+    assert response.status_code == 200
+    metrics = {
+        part.split(";", 1)[0]: float(part.split("=", 1)[1])
+        for part in response.headers["server-timing"].split(", ")
+    }
+    assert {"progress-db", "catalog", "total"} <= metrics.keys()
+    assert all(duration >= 0 for duration in metrics.values())
+
+
 def test_catalog_exposes_summaries_without_challenge_content(
     isolated_api: Path,
 ) -> None:

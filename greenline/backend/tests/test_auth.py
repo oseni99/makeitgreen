@@ -96,6 +96,7 @@ def test_verified_clerk_request_reaches_api(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "challenges" in response.json()
+    assert "auth;dur=" in response.headers["server-timing"]
 
 
 def test_hosted_api_requires_signed_beta_access_claim(monkeypatch) -> None:

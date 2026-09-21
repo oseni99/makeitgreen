@@ -39,6 +39,8 @@ abuse_control_adapter: abuse_controls.AbuseControlAdapter = (
     abuse_controls.LocalAbuseControlAdapter()
 )
 
+SERVER_TIMING_STATE_KEY = "server_timings"
+
 
 class RuntimeMode(StrEnum):
     LOCAL = "local"
@@ -512,9 +514,32 @@ def request_run_jobs(
     return request.app.state.run_jobs_adapter
 
 
+def _record_server_timing(request: Request, name: str, started: float) -> None:
+    """Record one request-local Server-Timing metric when instrumentation is active."""
+    metrics = getattr(request.state, SERVER_TIMING_STATE_KEY, None)
+    if isinstance(metrics, list):
+        metrics.append((name, max(0.0, (time.perf_counter() - started) * 1000)))
+
+
+async def server_timing(request: Request, call_next):
+    """Expose coarse API phase timings without changing request behavior."""
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    setattr(request.state, SERVER_TIMING_STATE_KEY, [])
+    started = time.perf_counter()
+    response = await call_next(request)
+    _record_server_timing(request, "total", started)
+    metrics = getattr(request.state, SERVER_TIMING_STATE_KEY)
+    response.headers["Server-Timing"] = ", ".join(
+        f"{name};dur={duration_ms:.2f}" for name, duration_ms in metrics
+    )
+    return response
+
+
 async def clerk_authentication(request: Request, call_next):
     settings: _RuntimeSettings = request.app.state.runtime_settings
     if request.url.path.startswith("/api/") and settings.clerk_secret is not None:
+        started = time.perf_counter()
         try:
             payload = auth.authenticate(
                 request,
@@ -523,6 +548,8 @@ async def clerk_authentication(request: Request, call_next):
             )
         except Exception:
             payload = None
+        finally:
+            _record_server_timing(request, "auth", started)
         if payload is None:
             return JSONResponse(status_code=401, content={"detail": "authentication required"})
         if (
@@ -558,6 +585,7 @@ async def enforce_abuse_controls(request: Request, call_next):
     classification = abuse_controls.classify_request(
         request.method, request.url.path
     )
+    admission_started = time.perf_counter()
     try:
         admission = settings.abuse_control_adapter.begin_request(
             user_id,
@@ -592,6 +620,8 @@ async def enforce_abuse_controls(request: Request, call_next):
             headers={"X-Request-ID": request_id},
             content={"detail": "request admission is temporarily unavailable"},
         )
+    finally:
+        _record_server_timing(request, "admission", admission_started)
     try:
         response = await call_next(request)
     except Exception:
@@ -873,12 +903,20 @@ def _catalog_summary(item: dict) -> dict:
 
 @router.get("/api/challenges")
 def list_challenges(request: Request) -> dict:
-    prog = request_learner_state(request).get_all(request_user_id(request))
-    items = []
-    for meta in ch.load_all():
-        item = _with_variant_progress(meta, prog)
-        item["progress"] = _catalog_progress(item["variants"])
-        items.append(_catalog_summary(item))
+    progress_started = time.perf_counter()
+    try:
+        prog = request_learner_state(request).get_all(request_user_id(request))
+    finally:
+        _record_server_timing(request, "progress-db", progress_started)
+    catalog_started = time.perf_counter()
+    try:
+        items = []
+        for meta in ch.load_all():
+            item = _with_variant_progress(meta, prog)
+            item["progress"] = _catalog_progress(item["variants"])
+            items.append(_catalog_summary(item))
+    finally:
+        _record_server_timing(request, "catalog", catalog_started)
     return {"challenges": items}
 
 
@@ -1169,6 +1207,7 @@ def create_application(
     allowed_origins = settings.authorized_parties or LOCAL_ORIGINS
     application.middleware("http")(enforce_abuse_controls)
     application.middleware("http")(clerk_authentication)
+    application.middleware("http")(server_timing)
     if settings.mode is RuntimeMode.HOSTED:
         application.add_middleware(
             abuse_controls.RequestBodyLimitMiddleware,
