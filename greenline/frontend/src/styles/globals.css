@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "./tokens.css";
-@import "@clerk/ui/themes/shadcn.css";
 
 @utility extend-touch-target {
   @media (pointer: coarse) {

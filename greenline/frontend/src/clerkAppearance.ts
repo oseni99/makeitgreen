@@ -1,15 +1,33 @@
-import { shadcn } from '@clerk/ui/themes'
-
 export const clerkAppearance = {
-  theme: shadcn,
   variables: {
     colorPrimary: '#0075de',
+    colorPrimaryForeground: '#ffffff',
     colorBackground: '#ffffff',
     colorForeground: '#000000',
+    colorDanger: '#c9362b',
+    colorInput: '#e6e6e6',
+    colorInputForeground: '#000000',
+    colorMuted: '#efeeec',
     colorMutedForeground: '#615d59',
+    colorNeutral: '#000000',
+    colorRing: 'rgb(0 117 222 / 50%)',
     borderRadius: '0.5rem',
     fontFamily: '"Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     spacingUnit: '1rem',
+  },
+  elements: {
+    input: { backgroundColor: 'transparent' },
+    cardBox: {
+      border: '1px solid #e6e6e6',
+      boxShadow: '0 1px 2px rgb(0 0 0 / 5%)',
+    },
+    popoverBox: {
+      border: '1px solid #e6e6e6',
+      boxShadow: '0 1px 2px rgb(0 0 0 / 5%)',
+    },
+    button: {
+      '&[data-variant="solid"]::after': { display: 'none' },
+    },
   },
   options: {
     // This only removes Clerk's local preview warning. Production instances do
@@ -25,6 +43,7 @@ export const signInAppearance = {
     socialButtonsVariant: 'blockButton',
   },
   elements: {
+    ...clerkAppearance.elements,
     rootBox: { width: '100%' },
     cardBox: {
       width: '100%',

@@ -566,20 +566,18 @@ screen reader, or representative mobile browsers. Pay particular attention to Mo
 editor tabs, the file panel overlay, output resizing, run history, confirmations, and
 focus restoration after navigation or errors.
 
-#### 18d. ~~Dependency security review~~ — REVIEWED, UPSTREAM FOLLOW-UP REMAINS
+#### 18d. ~~Dependency security review~~ — CLOSED
 
 The 2026-09-20 frontend audit started with 19 findings (1 low, 14 moderate, 4 high).
 Monaco pinned the browser-reachable `dompurify` 3.4.8; an npm override now resolves it to
-3.4.15, removing both the direct DOMPurify advisory and Monaco's derived finding. Full and
-production-only audits now report 17 findings (13 moderate, 4 high, 0 critical).
+3.4.15, removing both the direct DOMPurify advisory and Monaco's derived finding.
 
-Every remaining path originates in `@clerk/ui`'s Solana wallet dependency graph. The four
-high findings are Metro and `image-size` build-tool advisories. Those modules are installed
-in the disposable frontend-build stage, are absent from the Vite output, and are not copied
-into the final control-plane image, which contains only the static `dist` assets. Current
-`@clerk/ui` 1.33.1 retains the same Solana dependencies, while npm's suggested automatic
-fix is an incompatible downgrade to 0.3.24. Retain the current dependency deliberately,
-monitor Clerk for a corrected graph, and do not use `npm audit fix --force`.
+Every remaining path originated in `@clerk/ui`'s Solana wallet dependency graph, although
+MakeItGreen used that package only for its Shadcn theme. The theme was replaced with Clerk's
+documented `appearance.variables` and `appearance.elements` APIs, then `@clerk/ui` and its
+428 transitive packages were removed. Full and production-only audits now report zero known
+findings. Keep the targeted DOMPurify override until Monaco updates its own pin, and continue
+to avoid broad `npm audit fix --force` upgrades.
 
 #### 18e. Workspace maintainability
 
@@ -668,7 +666,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 35 | Real-browser staging acceptance suite | M–L | High (production confidence) | ☐ next |
 | 36 | Off-host backups, restore drill, external monitoring, and durable logs | L | Critical (recoverability) | ☐ now |
 | 37 | Keyboard, screen-reader, and mobile-browser audit | M | Medium–High | ☐ next |
-| 38 | Triage frontend dependency audit findings | S–M | Medium (supply-chain hygiene) | ✅ reviewed; DOMPurify patched, Clerk build-only upstream findings monitored |
+| 38 | Triage frontend dependency audit findings | S–M | Medium (supply-chain hygiene) | ✅ done; DOMPurify patched, unused Clerk UI dependency removed, zero audit findings |
 | 39 | Decompose `Workspace.tsx` behind behavior tests | M | Medium (maintainability) | ☐ later |
 | 40 | Reconcile this backlog with current beta state | S | High (planning accuracy) | ✅ done 2026-09-20 |
 
