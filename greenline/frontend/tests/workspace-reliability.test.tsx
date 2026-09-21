@@ -9,6 +9,9 @@ import { formatRunFailureOutput } from '../src/runFailure'
 import viteConfig from '../vite.config'
 
 vi.mock('../src/monacoSetup', () => ({}))
+vi.mock('../src/monacoLanguages', () => ({
+  useMonacoLanguage: (language: string) => language,
+}))
 
 const editorHarness = vi.hoisted(() => ({
   save: null as null | (() => Promise<void>),

@@ -39,8 +39,8 @@ authentication and tenant isolation, file-policy boundaries (including new-file
 create/delete), reset safety, mutation concurrency, malformed
 content, timeout cleanup, runner outcomes, streaming jobs, challenge environments,
 challenge overlays, and API contracts. The current frontend passes `npm test`,
-`npm run lint`, and `npm run build`; its 44 tests comprise four dependency-free Node
-checks plus 40 Vitest checks covering configured authentication, the design system,
+`npm run lint`, and `npm run build`; its 45 tests comprise four dependency-free Node
+checks plus 41 Vitest checks covering configured authentication, the design system,
 the practice loop, editor failure navigation, checkpoint restoration, route recovery,
 and solution-access failure handling. CI is
 `.github/workflows/greenline.yml`.
@@ -422,12 +422,14 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   sign-in, catalog, and profile do not download the editor implementation. The
   production entry chunk fell from roughly 4.4 MB to roughly 481 KB before gzip;
   Monaco and its workers remain editor-only asynchronous assets.
-- **Monaco scope:** the local ESM editor API keeps lightweight syntax tokenization for
-  Python, JavaScript, TypeScript/TSX, and Markdown plus the JSON language contribution.
-  Other basic languages are not registered or emitted. CSS, HTML, and TypeScript/JavaScript
+- **Monaco scope:** the local ESM editor API loads each tokenizer only when a file of that
+  language is opened. Python, JavaScript, TypeScript/TSX, Markdown, and JSON therefore ship
+  as independent asynchronous chunks rather than one editor-language bundle. Other basic
+  languages are not registered or emitted. CSS, HTML, and TypeScript/JavaScript
   language-service workers are also absent. JavaScript still receives syntax highlighting,
   while the challenge test suite remains the authority for correctness instead of Monaco's
-  TypeScript-powered diagnostics and IntelliSense.
+  TypeScript-powered diagnostics and IntelliSense. A focused test protects on-demand loading
+  and ensures a requested language is cached without registering the others.
 - **Product-native failure state:** spoil/unlock failures in Workspace and Solution no
   longer invoke `window.alert`. They keep the learner on the current page and render a
   restrained, accessible `role="alert"` message explaining that progress was not
@@ -564,12 +566,20 @@ screen reader, or representative mobile browsers. Pay particular attention to Mo
 editor tabs, the file panel overlay, output resizing, run history, confirmations, and
 focus restoration after navigation or errors.
 
-#### 18d. Dependency security review
+#### 18d. ~~Dependency security review~~ — REVIEWED, UPSTREAM FOLLOW-UP REMAINS
 
-The current frontend install reports 19 npm audit findings (1 low, 14 moderate, 4
-high). Audit whether each affected package reaches production, identify patched
-versions and breaking changes, and update deliberately. Do not run a broad forced audit
-fix that can silently change React, Vite, Monaco, Clerk, or the testing stack.
+The 2026-09-20 frontend audit started with 19 findings (1 low, 14 moderate, 4 high).
+Monaco pinned the browser-reachable `dompurify` 3.4.8; an npm override now resolves it to
+3.4.15, removing both the direct DOMPurify advisory and Monaco's derived finding. Full and
+production-only audits now report 17 findings (13 moderate, 4 high, 0 critical).
+
+Every remaining path originates in `@clerk/ui`'s Solana wallet dependency graph. The four
+high findings are Metro and `image-size` build-tool advisories. Those modules are installed
+in the disposable frontend-build stage, are absent from the Vite output, and are not copied
+into the final control-plane image, which contains only the static `dist` assets. Current
+`@clerk/ui` 1.33.1 retains the same Solana dependencies, while npm's suggested automatic
+fix is an incompatible downgrade to 0.3.24. Retain the current dependency deliberately,
+monitor Clerk for a corrected graph, and do not use `npm audit fix --force`.
 
 #### 18e. Workspace maintainability
 
@@ -658,7 +668,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 35 | Real-browser staging acceptance suite | M–L | High (production confidence) | ☐ next |
 | 36 | Off-host backups, restore drill, external monitoring, and durable logs | L | Critical (recoverability) | ☐ now |
 | 37 | Keyboard, screen-reader, and mobile-browser audit | M | Medium–High | ☐ next |
-| 38 | Triage frontend dependency audit findings | S–M | Medium (supply-chain hygiene) | ☐ next; do not apply blind automated upgrades |
+| 38 | Triage frontend dependency audit findings | S–M | Medium (supply-chain hygiene) | ✅ reviewed; DOMPurify patched, Clerk build-only upstream findings monitored |
 | 39 | Decompose `Workspace.tsx` behind behavior tests | M | Medium (maintainability) | ☐ later |
 | 40 | Reconcile this backlog with current beta state | S | High (planning accuracy) | ✅ done 2026-09-20 |
 

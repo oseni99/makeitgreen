@@ -11,6 +11,7 @@ import {
 } from '../api'
 import { LoadError } from '../components/LoadError'
 import { PageLoading } from '../components/PageLoading'
+import { useMonacoLanguage } from '../monacoLanguages'
 import { defineGreenlineTheme } from '../monacoTheme'
 import { Button } from '@/components/ui/button'
 import { buttonVariants } from '@/components/ui/button-variants'
@@ -49,6 +50,7 @@ function FileBlock({
   const left = compareMode === 'yours' ? (userContent ?? '') : original
   const leftLabel = compareMode === 'yours' ? 'yours' : 'broken'
   const height = editorHeight(fixed, left)
+  const language = useMonacoLanguage(editorLanguage(path))
 
   const leftSource =
     compareMode === 'yours'
@@ -81,13 +83,13 @@ function FileBlock({
           ))}
         </div>
       </div>
-      {view === 'diff' ? (
+      {view === 'diff' && language ? (
         <div className="bg-console" style={{ height }}>
           <DiffEditor
             key={compareMode}
             original={left}
             modified={fixed}
-            language={editorLanguage(path)}
+            language={language}
             beforeMount={defineGreenlineTheme}
             theme="greenline"
             options={{
@@ -101,6 +103,14 @@ function FileBlock({
               hideUnchangedRegions: { enabled: true },
             }}
           />
+        </div>
+      ) : view === 'diff' ? (
+        <div
+          className="grid bg-console font-mono text-xs text-console-muted"
+          role="status"
+          style={{ height }}
+        >
+          <span className="place-self-center">Preparing diff…</span>
         </div>
       ) : (
         <pre className="m-0 max-h-[480px] overflow-auto bg-console p-5 font-mono text-[12.5px] leading-7 text-console-foreground">

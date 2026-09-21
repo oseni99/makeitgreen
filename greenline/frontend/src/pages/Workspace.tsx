@@ -12,6 +12,7 @@ import {
 } from '../api'
 import { LoadError } from '../components/LoadError'
 import { PageLoading } from '../components/PageLoading'
+import { useMonacoLanguage } from '../monacoLanguages'
 import { defineGreenlineTheme } from '../monacoTheme'
 import { formatRunFailureOutput } from '../runFailure'
 import {
@@ -362,6 +363,7 @@ export default function Workspace() {
   const [fileOpError, setFileOpError] = useState('')
   /** Narrow viewports: side panel toggled; desktop CSS ignores this. */
   const [mobileSideOpen, setMobileSideOpen] = useState(false)
+  const editorLanguage = useMonacoLanguage(languageFor(openPath))
   const contentsRef = useRef(contents)
   const dirtyRef = useRef(dirty)
   const openPathRef = useRef(openPath)
@@ -1193,25 +1195,34 @@ export default function Workspace() {
             </div>
           )}
           <div className="workspace-code min-h-[180px] flex-1 bg-console">
-            <Editor
-              path={openPath}
-              language={languageFor(openPath)}
-              value={contents[openPath] ?? ''}
-              onChange={onEdit}
-              beforeMount={defineGreenlineTheme}
-              onMount={onEditorMount}
-              theme="greenline"
-              options={{
-                readOnly: openFileMeta?.readonly ?? false,
-                fontSize: 13.5,
-                fontFamily: "'IBM Plex Mono', monospace",
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                padding: { top: 14 },
-                glyphMargin: true,
-                renderLineHighlight: 'gutter',
-              }}
-            />
+            {editorLanguage ? (
+              <Editor
+                path={openPath}
+                language={editorLanguage}
+                value={contents[openPath] ?? ''}
+                onChange={onEdit}
+                beforeMount={defineGreenlineTheme}
+                onMount={onEditorMount}
+                theme="greenline"
+                options={{
+                  readOnly: openFileMeta?.readonly ?? false,
+                  fontSize: 13.5,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  padding: { top: 14 },
+                  glyphMargin: true,
+                  renderLineHighlight: 'gutter',
+                }}
+              />
+            ) : (
+              <div
+                className="grid h-full place-items-center font-mono text-xs text-console-muted"
+                role="status"
+              >
+                Preparing editor…
+              </div>
+            )}
           </div>
 
           <section

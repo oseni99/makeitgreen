@@ -6,6 +6,9 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { SolutionRoute } from '../src/pages/KeyedRoutes'
 
 vi.mock('../src/monacoSetup', () => ({}))
+vi.mock('../src/monacoLanguages', () => ({
+  useMonacoLanguage: (language: string) => language,
+}))
 
 vi.mock('@monaco-editor/react', () => ({
   loader: { config: () => {} },

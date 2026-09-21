@@ -8,6 +8,9 @@ import Catalog from '../src/pages/Catalog'
 import { SolutionRoute, WorkspaceRoute } from '../src/pages/KeyedRoutes'
 
 vi.mock('../src/monacoSetup', () => ({}))
+vi.mock('../src/monacoLanguages', () => ({
+  useMonacoLanguage: (language: string) => language,
+}))
 
 vi.mock('@monaco-editor/react', () => ({
   default: ({ value, onChange }: { value: string; onChange?: (value: string) => void }) => (
