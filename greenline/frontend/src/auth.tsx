@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { setAuthTokenProvider } from './authToken'
 import { signInAppearance } from './clerkAppearance'
+import { PageLoading } from './components/PageLoading'
 
 export function AuthBridge() {
   const { getToken } = useAuth()
@@ -19,7 +20,7 @@ export function ProtectedRoute() {
   const { isLoaded, isSignedIn } = useAuth()
   const location = useLocation()
 
-  if (!isLoaded) return <div className="py-32 text-center text-sm text-muted-foreground">Loading account…</div>
+  if (!isLoaded) return <PageLoading label="Loading account…" />
   if (!isSignedIn) {
     const returnTo = `${location.pathname}${location.search}`
     return <Navigate to={`/sign-in?redirect_url=${encodeURIComponent(returnTo)}`} replace />
@@ -33,8 +34,20 @@ export function RouteGate() {
 }
 
 export function SignInPage() {
+  if (!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) {
+    return <Navigate to="/challenges" replace />
+  }
+  return <ConfiguredSignInPage />
+}
+
+function ConfiguredSignInPage() {
+  const { isLoaded, isSignedIn } = useAuth()
+
+  if (!isLoaded) return <PageLoading label="Loading account…" />
+  if (isSignedIn) return <Navigate to="/challenges" replace />
+
   return (
-    <main className="min-h-[calc(100svh-4rem)] bg-muted/50 px-6 py-12 md:px-10 md:py-20">
+    <main className="min-h-[calc(100svh-4rem)] bg-background px-6 py-12 md:px-10 md:py-20">
       <div className="mx-auto grid max-w-[960px] items-center gap-10 md:grid-cols-[1fr_26rem] md:gap-16">
         <section aria-labelledby="sign-in-page-heading">
           <p className="text-xs font-semibold uppercase tracking-[0.0078rem] text-primary">

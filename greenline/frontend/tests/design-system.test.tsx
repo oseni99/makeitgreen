@@ -4,6 +4,8 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { expect, it, vi } from 'vitest'
 
 import App from '../src/App'
+import { LoadError } from '../src/components/LoadError'
+import { PageLoading } from '../src/components/PageLoading'
 import { defineGreenlineTheme } from '../src/monacoTheme'
 import '../src/styles/tokens.css'
 
@@ -69,4 +71,23 @@ it('defines Monaco colors from the active application theme', () => {
       ]),
     }),
   )
+})
+
+it('presents load failures as a product recovery state without development instructions', async () => {
+  const retry = vi.fn()
+  const user = userEvent.setup()
+
+  render(<LoadError onRetry={retry} />)
+
+  expect(screen.getByRole('heading', { name: 'We couldn’t load this page.' })).toBeTruthy()
+  expect(screen.queryByText(/uvicorn|:8000/i)).toBeNull()
+
+  await user.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(retry).toHaveBeenCalledOnce()
+})
+
+it('uses one accessible full-page loading treatment', () => {
+  render(<PageLoading label="Loading challenges…" />)
+
+  expect(screen.getByRole('status').textContent).toContain('Loading challenges…')
 })

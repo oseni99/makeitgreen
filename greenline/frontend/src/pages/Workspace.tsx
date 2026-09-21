@@ -11,6 +11,8 @@ import {
   type RunResult,
 } from '../api'
 import { LoadError } from '../components/LoadError'
+import { PageLoading } from '../components/PageLoading'
+import { useMonacoLanguage } from '../monacoLanguages'
 import { defineGreenlineTheme } from '../monacoTheme'
 import { formatRunFailureOutput } from '../runFailure'
 import {
@@ -356,10 +358,12 @@ export default function Workspace() {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
   const [restoringRunId, setRestoringRunId] = useState<number | null>(null)
   const [restoreError, setRestoreError] = useState('')
+  const [solutionAccessError, setSolutionAccessError] = useState('')
   const [newPath, setNewPath] = useState('')
   const [fileOpError, setFileOpError] = useState('')
   /** Narrow viewports: side panel toggled; desktop CSS ignores this. */
   const [mobileSideOpen, setMobileSideOpen] = useState(false)
+  const editorLanguage = useMonacoLanguage(languageFor(openPath))
   const contentsRef = useRef(contents)
   const dirtyRef = useRef(dirty)
   const openPathRef = useRef(openPath)
@@ -879,13 +883,14 @@ export default function Workspace() {
   }
 
   if (!challenge)
-    return <div className="py-32 text-center text-sm text-muted-foreground">Opening workspace…</div>
+    return <PageLoading label="Opening workspace…" />
 
   const openFileMeta = challenge.files.find((f) => f.path === openPath)
   const solved = challenge.progress.status === 'solved'
   const alreadyOpen = solved || !!challenge.progress.spoiled
 
   async function handleSolutionNav(e: React.MouseEvent) {
+    setSolutionAccessError('')
     if (dirty.size > 0 && !window.confirm('You have unsaved changes. Leave anyway?')) {
       e.preventDefault()
       return
@@ -902,7 +907,7 @@ export default function Workspace() {
       const { progress } = await api.spoil(slug)
       setChallenge((ch) => (ch ? { ...ch, progress } : ch))
     } catch {
-      window.alert('Could not record spoil — try again.')
+      setSolutionAccessError('Could not unlock the solution. Your progress was not changed. Try again.')
       return
     }
     if (dirty.size > 0) skipUnsavedRef.current = true
@@ -1017,6 +1022,15 @@ export default function Workspace() {
           </div>
         </div>
       </div>
+
+      {solutionAccessError && (
+        <div
+          className="shrink-0 border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-sm text-destructive md:px-6"
+          role="alert"
+        >
+          {solutionAccessError}
+        </div>
+      )}
 
       {solved && (
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-success/20 bg-success/10 px-4 py-2 text-sm text-success md:px-6">
@@ -1181,25 +1195,34 @@ export default function Workspace() {
             </div>
           )}
           <div className="workspace-code min-h-[180px] flex-1 bg-console">
-            <Editor
-              path={openPath}
-              language={languageFor(openPath)}
-              value={contents[openPath] ?? ''}
-              onChange={onEdit}
-              beforeMount={defineGreenlineTheme}
-              onMount={onEditorMount}
-              theme="greenline"
-              options={{
-                readOnly: openFileMeta?.readonly ?? false,
-                fontSize: 13.5,
-                fontFamily: "'IBM Plex Mono', monospace",
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                padding: { top: 14 },
-                glyphMargin: true,
-                renderLineHighlight: 'gutter',
-              }}
-            />
+            {editorLanguage ? (
+              <Editor
+                path={openPath}
+                language={editorLanguage}
+                value={contents[openPath] ?? ''}
+                onChange={onEdit}
+                beforeMount={defineGreenlineTheme}
+                onMount={onEditorMount}
+                theme="greenline"
+                options={{
+                  readOnly: openFileMeta?.readonly ?? false,
+                  fontSize: 13.5,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  padding: { top: 14 },
+                  glyphMargin: true,
+                  renderLineHighlight: 'gutter',
+                }}
+              />
+            ) : (
+              <div
+                className="grid h-full place-items-center font-mono text-xs text-console-muted"
+                role="status"
+              >
+                Preparing editor…
+              </div>
+            )}
           </div>
 
           <section

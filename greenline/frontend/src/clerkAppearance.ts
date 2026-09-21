@@ -31,7 +31,7 @@ export const signInAppearance = {
       overflow: 'hidden',
       border: '1px solid #e6e6e6',
       borderRadius: '0.75rem',
-      boxShadow: '0 0.8px 2.925px rgb(0 0 0 / 0.02), 0 4px 18px rgb(0 0 0 / 0.04)',
+      boxShadow: 'none',
     },
     card: {
       width: '100%',
