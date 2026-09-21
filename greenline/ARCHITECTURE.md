@@ -350,7 +350,7 @@ execution or tenant mixing.
 | Catalog | `GET /api/challenges` | Non-sensitive challenge summaries joined with learner progress |
 | Workspace | `GET /api/challenges/{slug}` and `/files/{path}` | Metadata, tree, and effective file content |
 | Editing | `PUT/POST/DELETE .../files/{path}` | Save, create, or remove overlays under challenge policy |
-| Tools | `GET .../search`, `POST .../reset` | Search the effective workspace or reset learner state |
+| Tools | `POST .../reset` | Reset learner state |
 | Runs | `POST .../run`, `POST .../runs`, `GET .../runs` | Local synchronous compatibility, async start, and history |
 | Job output | `GET /api/run-jobs/{job_id}` | Poll bounded incremental output and terminal result |
 | Solution | `POST .../spoil`, `GET .../solution` | Record reveal and read reference content only after solved/spoiled authorization |
