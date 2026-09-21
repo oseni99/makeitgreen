@@ -1,20 +1,20 @@
 {
   "order": 1,
-  "title": "orders-service",
+  "title": "Flash-sale checkout",
   "type": "Concurrency",
   "difficulty": "Medium",
-  "minutes": 25,
+  "minutes": 40,
   "minimum_tests": 15,
   "maximum_pristine_pass_percent": 30,
   "language": "Python",
-  "blurb": "Concurrent checkouts are overselling inventory. Find the race, preserve the order and stock contracts, and keep unrelated SKUs moving in parallel.",
-  "brief": "This order service handles checkouts for a flash-sale platform. Under load, inventory counts go negative — customers are buying stock that doesn't exist.\n\nThe test suite covers the working order, discount, stock, and checkout contracts as well as the failing concurrent path.\n\n**Your job:** make all tests green without breaking the passing behavior. The fix should still allow concurrent checkouts of *different* SKUs to proceed in parallel.",
+  "blurb": "Repair a flash-sale checkout workflow that oversells stock, mishandles retries and failures, and corrupts cancellation state.",
+  "brief": "A flash-sale service creates and prices orders, authorizes inventory reservations, completes checkout, and returns stock when a completed order is cancelled. Production traffic exposed several interacting failures: limited stock can be oversold, retries repeat side effects, authorization errors strand orders in an intermediate state, and cancellation does not preserve inventory.\n\nRead the repository and tests as one checkout contract. Preserve the public API, exact pricing behavior, and concurrency between unrelated SKUs. Requests that already reached a terminal state must remain retry-safe.\n\n**Your job:** make the full checkout lifecycle correct under retries, failures, and concurrent calls without weakening the tests or globally serializing independent products.",
   "readonly": ["tests/"],
   "creatable": ["orders/"],
   "variants": {
     "javascript": {
       "language": "JavaScript",
-      "brief": "This Node.js order service handles concurrent checkouts for a flash-sale platform. Under load, many buyers reserve the same limited inventory because the availability check and decrement are separated by an asynchronous authorization step.\n\nRun the tests. The concurrency contract expects exactly the available number of checkouts to succeed, inventory to stop at zero, and unrelated SKUs to remain independent.\n\n**Your job:** make all tests green without breaking the passing behavior. Do not solve the race by serializing reservations for different SKUs.",
+      "brief": "A Node.js flash-sale service creates and prices orders, authorizes inventory reservations, completes checkout, and returns stock when a completed order is cancelled. Production traffic exposed several interacting failures: limited stock can be oversold across `await` boundaries, retries repeat side effects, authorization errors strand orders in an intermediate state, and cancellation does not preserve inventory.\n\nRead the repository and tests as one checkout contract. Preserve the public API, exact pricing behavior, and concurrency between unrelated SKUs. Requests that already reached a terminal state must remain retry-safe.\n\n**Your job:** make the full checkout lifecycle correct under retries, failures, and concurrent calls without weakening the tests or globally serializing independent products.",
       "readonly": ["test/"],
       "creatable": ["src/"],
       "runtime": {

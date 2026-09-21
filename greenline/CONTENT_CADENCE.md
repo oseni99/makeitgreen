@@ -4,6 +4,10 @@ MakeItGreen publishes one reviewed challenge per week. Quality gates matter
 more than the calendar; an unfinished challenge rolls forward rather than
 shipping with ambiguous tests.
 
+All challenge work must follow [CHALLENGE_AUTHORING_STANDARD.md](CHALLENGE_AUTHORING_STANDARD.md).
+The calendar below schedules the work; the authoring standard defines whether that
+work is good enough to publish.
+
 ## Weekly cycle
 
 | Day | Deliverable |
@@ -18,7 +22,10 @@ shipping with ambiguous tests.
 
 A challenge is catalog-ready only when:
 
+- its behavior coverage matrix and editorial rubric pass the authoring standard;
 - the failure represents a plausible production or interview mistake;
+- its depth comes from independent behavioral contracts rather than repeated
+  parameter cases;
 - at least one unrelated behavior already passes in the pristine repo;
 - tests use injected clocks, barriers, or fakes instead of sleeps and networks;
 - `tests/` and evidence folders are read-only;

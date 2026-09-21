@@ -211,7 +211,7 @@ configuration uses Clerk with Google as the sole sign-in provider.
 
 | Challenge | Type | What's broken |
 |---|---|---|
-| `orders-service` | Concurrency | Check-then-act race oversells inventory under concurrent checkouts |
+| `orders-service` | Concurrency | Checkout lifecycle races corrupt stock, retries, recovery, and cancellation |
 | `wallet-service` | Repository Implementation | Overdraft on transfers + minimum fee never charged |
 | `ledger-api` | API Contract Debugging | Wrong status code, 500 on missing entry, ignored Idempotency-Key |
 | `incident-alerts` | Incident Debugging | Missed page: naive vs aware timestamps (fail-closed) + exclusive window drops the sample at `now` |
@@ -302,6 +302,8 @@ the base slug; additional variants use `<slug>@<variant>`.
 New content starts in **[QUESTION_BANK.md](QUESTION_BANK.md)**. It tracks researched,
 original candidate questions and their implementation status. New specifications must
 become broken repositories, tests, and reviewed solutions before entering the catalog.
+Existing content is reviewed against the same bar in
+**[CHALLENGE_AUDIT.md](CHALLENGE_AUDIT.md)**.
 
 Use **[PREP_TRACKS.md](PREP_TRACKS.md)** for curated learning paths and the difficulty
 ladder. Challenge authors should follow **[CONTENT_CADENCE.md](CONTENT_CADENCE.md)**;

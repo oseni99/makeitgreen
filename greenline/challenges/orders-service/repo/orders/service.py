@@ -1,16 +1,17 @@
-"""Order creation and checkout."""
+"""Order creation, pricing, checkout, and cancellation."""
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from orders.inventory import InsufficientStock, Inventory
 
 _order_ids = itertools.count(1)
 
 DISCOUNT_TIERS = [
-    (10_000, 0.10),  # 10% off orders of $100+
-    (5_000, 0.05),   # 5% off orders of $50+
+    (10_000, 0.10),
+    (5_000, 0.05),
 ]
 
 
@@ -33,15 +34,24 @@ class Order:
 
 
 class OrderService:
-    def __init__(self, inventory: Inventory) -> None:
+    def __init__(
+        self,
+        inventory: Inventory,
+        before_checkout: Callable[[Order], None] | None = None,
+    ) -> None:
         self.inventory = inventory
         self.orders: dict[int, Order] = {}
+        self._before_checkout = before_checkout or (lambda _order: None)
 
     def create_order(self, sku: str, qty: int, unit_price_cents: int) -> Order:
         if qty <= 0:
             raise ValueError("qty must be positive")
-        order = Order(id=next(_order_ids), sku=sku, qty=qty,
-                      unit_price_cents=unit_price_cents)
+        order = Order(
+            id=next(_order_ids),
+            sku=sku,
+            qty=qty,
+            unit_price_cents=unit_price_cents,
+        )
         self.orders[order.id] = order
         return order
 
@@ -53,15 +63,16 @@ class OrderService:
         return order
 
     def checkout(self, order: Order) -> bool:
-        """Reserve inventory and complete the order.
-
-        Returns True if checkout succeeded, False if stock ran out.
-        Called concurrently from checkout worker threads.
-        """
+        self._before_checkout(order)
+        order.status = "processing"
         try:
             self.inventory.reserve(order.sku, order.qty)
         except InsufficientStock:
             order.status = "rejected"
             return False
         order.status = "completed"
+        return True
+
+    def cancel(self, order: Order) -> bool:
+        order.status = "cancelled"
         return True

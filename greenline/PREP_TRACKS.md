@@ -24,7 +24,7 @@ For engineers new to repository interviews. Target: 6–8 sessions.
 For backend interviews where retries, races, and consistency matter. Target:
 6–8 sessions.
 
-1. `orders-service` — recognize check-then-act races.
+1. `orders-service` — preserve stock and order lifecycles under concurrency and retries.
 2. `transfer-deadlock` — establish a global lock order.
 3. `rate-limiter` — make admission atomic and tenant-scoped.
 4. `job-lease` — fence stale workers after lease expiry.

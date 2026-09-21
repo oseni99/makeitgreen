@@ -5,7 +5,7 @@ language implementations of existing concepts. `webhook-batch-node` and
 `notification-dispatch-node` remain standalone because their scenarios are designed
 around Node. Six concepts now offer a Python/JavaScript choice:
 
-- `orders-service` — asynchronous inventory race;
+- `orders-service` — asynchronous inventory, retry, recovery, and cancellation races;
 - `wallet-service` — money invariants and atomic failure;
 - `config-merge` — recursive merging without truthiness bugs or mutation;
 - `token-auth-api` — exact credential and capability matching;

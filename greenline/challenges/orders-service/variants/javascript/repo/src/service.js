@@ -3,13 +3,15 @@
 const { InsufficientStock } = require('./inventory')
 
 class OrderService {
-  constructor(inventory) {
+  constructor(inventory, beforeCheckout = async () => {}) {
     this.inventory = inventory
     this.orders = new Map()
     this._nextId = 1
+    this._beforeCheckout = beforeCheckout
   }
 
   createOrder(sku, quantity, unitPriceCents) {
+    if (quantity <= 0) throw new RangeError('quantity must be positive')
     const order = {
       id: this._nextId++,
       sku,
@@ -24,7 +26,7 @@ class OrderService {
   }
 
   applyDiscount(order) {
-    const rate = order.quantity >= 5 ? 0.1 : order.quantity >= 3 ? 0.05 : 0
+    const rate = order.subtotalCents >= 10000 ? 0.1 : order.subtotalCents >= 5000 ? 0.05 : 0
     order.discountCents = Math.round(order.subtotalCents * rate)
     return order
   }
@@ -34,6 +36,8 @@ class OrderService {
   }
 
   async checkout(order) {
+    await this._beforeCheckout(order)
+    order.status = 'processing'
     try {
       await this.inventory.reserve(order.sku, order.quantity)
     } catch (error) {
@@ -43,7 +47,12 @@ class OrderService {
       }
       throw error
     }
-    order.status = 'paid'
+    order.status = 'completed'
+    return true
+  }
+
+  async cancel(order) {
+    order.status = 'cancelled'
     return true
   }
 }

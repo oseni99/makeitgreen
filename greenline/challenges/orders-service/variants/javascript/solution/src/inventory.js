@@ -10,6 +10,7 @@ class Inventory {
   }
 
   addStock(sku, quantity) {
+    if (quantity <= 0) throw new RangeError('quantity must be positive')
     this._stock.set(sku, (this._stock.get(sku) ?? 0) + quantity)
   }
 
@@ -17,7 +18,7 @@ class Inventory {
     return this._stock.get(sku) ?? 0
   }
 
-  async reserve(sku, quantity) {
+  async _withSkuLock(sku, action) {
     const previous = this._tails.get(sku) ?? Promise.resolve()
     let release
     const ticket = new Promise((resolve) => {
@@ -28,17 +29,29 @@ class Inventory {
 
     await previous
     try {
+      return await action()
+    } finally {
+      release()
+      if (this._tails.get(sku) === tail) this._tails.delete(sku)
+    }
+  }
+
+  async reserve(sku, quantity) {
+    if (quantity <= 0) throw new RangeError('quantity must be positive')
+    await this._authorize(sku)
+    return this._withSkuLock(sku, async () => {
       if (this.available(sku) < quantity) {
         throw new InsufficientStock(sku)
       }
-      await this._authorize(sku)
       this._stock.set(sku, this.available(sku) - quantity)
-    } finally {
-      release()
-      if (this._tails.get(sku) === tail) {
-        this._tails.delete(sku)
-      }
-    }
+    })
+  }
+
+  async release(sku, quantity) {
+    if (quantity <= 0) throw new RangeError('quantity must be positive')
+    return this._withSkuLock(sku, async () => {
+      this._stock.set(sku, this.available(sku) + quantity)
+    })
   }
 }
 

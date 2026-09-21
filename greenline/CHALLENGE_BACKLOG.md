@@ -16,7 +16,7 @@ Three researched, original candidate-question batches are specified in
 
 | Order | Slug | Type | Difficulty | Minutes | Core skill |
 |------:|------|------|------------|--------:|------------|
-| 1 | `orders-service` | Concurrency | Medium | 25 | Inventory check-then-act race (TOCTOU) |
+| 1 | `orders-service` | Concurrency | Medium | 40 | Atomic stock, retry-safe checkout, recovery, and cancellation |
 | 2 | `wallet-service` | Repository Implementation | Easy | 20 | Read tests-as-spec; overdraft + minimum fee bugs |
 | 3 | `ledger-api` | API Contract Debugging | Medium | 30 | Wrong status codes, 500 on missing entry, idempotency |
 | 4 | `incident-alerts` | Incident Debugging | Medium | 30 | Logs → alerting root cause (timestamps + window) |

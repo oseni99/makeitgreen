@@ -1,44 +1,74 @@
-# Solution — orders-service
+# Flash-sale checkout solution
 
-## Root cause
+## Problem summary
 
-`Inventory.reserve()` is a **check-then-act race**. The availability check and
-the decrement are separate steps with I/O in between (the simulated
-fraud/payment round-trip). Under concurrency, many threads pass the check
-while stock is still available, then *all* of them decrement — driving stock
-negative.
+The checkout service coordinates mutable order state with inventory shared by worker
+threads. The starter handles ordinary creation and pricing, but concurrency, retries,
+exceptions, and cancellation can make the order record disagree with available stock.
 
-This is the classic TOCTOU (time-of-check to time-of-use) bug. The `sleep`
-only widens the window; the race exists without it.
+## Starter bugs fixed
 
-## Fix
+- Order creation accepted blank SKUs and non-positive unit prices.
+- Inventory accepted a zero-sized reservation.
+- Reservation checked stock before authorization and decremented afterward without
+  synchronization, so every waiter could approve the same units.
+- Checkout repeated inventory effects when a completed or rejected order was retried.
+- Two concurrent calls for one order could both perform the checkout side effect.
+- Unexpected authorization errors left the order stuck in `processing`.
+- Cancellation accepted orders that never completed, returned no stock, and succeeded
+  repeatedly.
 
-Make check + decrement atomic with a lock. A single global lock works but
-serializes *all* SKUs; a lock **per SKU** keeps unrelated checkouts parallel —
-which is what the brief asked to preserve.
+## Corrected behavior
 
-```python
-def reserve(self, sku: str, qty: int) -> None:
-    lock = self._locks[sku]          # per-SKU lock via defaultdict
-    with lock:
-        if self._stock.get(sku, 0) < qty:
-            raise InsufficientStock(sku)
-        time.sleep(0.001)
-        self._stock[sku] -= qty
-```
+Inputs are validated before an order is registered. Authorization happens without
+holding an inventory lock; afterward, stock is rechecked and decremented atomically
+under a lock dedicated to that SKU. Each order has its own lifecycle lock, so retries
+observe the terminal result instead of replaying the side effect. Unexpected failures
+restore `created`, while insufficient stock becomes terminal `rejected`. Cancellation
+transitions only `completed` orders and releases their stock exactly once.
 
-Note `defaultdict(threading.Lock)` itself has a subtle thread-safety caveat:
-two threads can race creating the lock for a brand-new SKU. Guarding lock
-creation with a small meta-lock (as in the reference file) closes it.
+## Edge cases covered
+
+The suite covers blank identities, zero and negative money, zero reservations, exact
+discount boundaries, insufficient stock, several stock/quantity remainders,
+independent SKUs, simultaneous retries of one order, repeated completed and rejected
+calls, authorization exceptions, cancellation before completion, and repeated
+cancellation.
+
+## What to watch for
+
+- A global lock fixes overselling but unnecessarily blocks unrelated SKUs.
+- Locking only checkout does not protect direct inventory reservations.
+- Checking stock before authorization and locking only the decrement preserves the
+  race because the decision was made from stale state.
+- Returning early for completed orders without synchronizing the status check still
+  lets simultaneous first attempts both proceed.
+- Resetting every failure to `created` makes insufficient-stock orders retryable even
+  though rejection is part of the terminal contract.
+- Restocking before validating cancellation state can duplicate inventory.
+
+## Why the fix works
+
+The SKU lock makes stock validation and mutation one atomic decision while retaining
+parallelism between products. The order lock makes lifecycle inspection and side
+effects one serialized command per order. Exception-specific transitions keep the
+order state aligned with whether inventory changed. Cancellation performs its state
+check, release, and transition within the same order critical section.
+
+## Tradeoffs and production considerations
+
+In production, inventory would usually live in a database. An atomic conditional
+`UPDATE`, row lock, or reservation ledger would replace the in-memory SKU lock. A
+remote payment authorization and a database mutation cannot share a normal process
+lock, so a durable idempotency record and compensation workflow would be required.
+Per-key locks also need lifecycle management in a long-running service with unbounded
+SKU or order cardinality.
 
 ## Interview talking points
 
-- Name the bug class out loud: "check-then-act race / TOCTOU."
-- Trade-off: global lock (simple, serializes everything) vs per-key lock
-  (parallel, more code) vs optimistic CAS/atomics (no locks, retry loop).
-- In a real service this state lives in a database: the equivalent fixes are
-  `SELECT ... FOR UPDATE`, an atomic `UPDATE ... WHERE stock >= qty`, or a
-  unique reservation ledger. Interviewers love hearing the DB mapping.
-- Holding the lock across the simulated I/O is defensible here (correctness
-  first) but worth flagging: in production you'd authorize payment *before*
-  or *after* the critical section, not inside it.
+- Describe the defect as stale check-then-act state, not merely “missing a lock.”
+- Separate order idempotency from inventory atomicity; they protect different keys.
+- Explain why authorization stays outside the SKU critical section and stock is
+  rechecked afterward.
+- Map in-memory synchronization to conditional database writes and durable command
+  idempotency.

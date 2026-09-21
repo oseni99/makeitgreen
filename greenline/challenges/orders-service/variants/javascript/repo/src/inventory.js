@@ -21,10 +21,13 @@ class Inventory {
       throw new InsufficientStock(sku)
     }
 
-    // Authorization yields to other checkout requests between the stock check
-    // and its write. Several callers can therefore approve the same units.
+    // Authorization yields to other requests between the stock check and write.
     await this._authorize(sku)
     this._stock.set(sku, this.available(sku) - quantity)
+  }
+
+  async release(sku, quantity) {
+    this._stock.set(sku, this.available(sku) + quantity)
   }
 }
 
