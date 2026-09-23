@@ -1,9 +1,13 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -65,6 +69,59 @@ def _as(user_id: str) -> dict[str, str]:
     return {"X-Test-User": user_id}
 
 
+def test_clerk_session_verification_is_networkless_with_configured_jwt_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "sub": "user_123",
+            "azp": "https://app.example.com",
+            "iat": now,
+            "nbf": now - 1,
+            "exp": now + 60,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "test-key"},
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/challenges",
+            "query_string": b"",
+            "headers": [(b"authorization", f"Bearer {token}".encode("ascii"))],
+            "scheme": "https",
+            "server": ("app.example.com", 443),
+            "client": ("127.0.0.1", 1234),
+        }
+    )
+
+    def unexpected_jwks_fetch(*_args, **_kwargs):
+        pytest.fail("networkless verification must not fetch Clerk JWKS")
+
+    monkeypatch.setattr(
+        "clerk_backend_api.security.verifytoken._fetch_jwks",
+        unexpected_jwks_fetch,
+    )
+
+    payload = api.auth.authenticate(
+        request,
+        secret_key="sk_test_example",
+        jwt_key=public_key,
+        parties=["https://app.example.com"],
+    )
+
+    assert payload is not None
+    assert payload["sub"] == "user_123"
+
+
 def test_api_requires_clerk_when_secret_is_configured(monkeypatch) -> None:
     monkeypatch.setattr(api.auth, "authenticate", lambda _request, **_kwargs: None)
     application = api.create_application(
@@ -99,10 +156,36 @@ def test_verified_clerk_request_reaches_api(monkeypatch) -> None:
     assert "auth;dur=" in response.headers["server-timing"]
 
 
+def test_application_reuses_one_clerk_client_across_requests(monkeypatch) -> None:
+    clients = []
+
+    def authenticate(_request, **options):
+        clients.append(options["client"])
+        return {"sub": "user_123"}
+
+    monkeypatch.setattr(api.auth, "authenticate", authenticate)
+    application = api.create_application(
+        {
+            "GREENLINE_MODE": "local",
+            "CLERK_SECRET_KEY": "sk_test_example",
+            "CLERK_JWT_KEY": "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+        }
+    )
+    client = TestClient(application)
+
+    assert client.get("/api/challenges").status_code == 200
+    assert client.get("/api/challenges").status_code == 200
+    assert len(clients) == 2
+    assert clients[0] is clients[1]
+    assert clients[0] is application.state.runtime_settings.clerk_client
+
+
 def test_hosted_api_requires_signed_beta_access_claim(monkeypatch) -> None:
     settings = SimpleNamespace(
         mode=api.RuntimeMode.HOSTED,
         clerk_secret="sk_test_example",
+        clerk_jwt_key="-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+        clerk_client=None,
         authorized_parties=("https://app.example.com",),
         security_events=SimpleNamespace(emit=lambda *_args, **_kwargs: None),
     )

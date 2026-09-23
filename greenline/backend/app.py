@@ -63,6 +63,8 @@ class CompositionError(RuntimeError):
 class _RuntimeSettings:
     mode: RuntimeMode
     clerk_secret: str | None
+    clerk_jwt_key: str | None
+    clerk_client: auth.Clerk | None
     authorized_parties: tuple[str, ...]
     execution_adapter: runner.ExecutionAdapter
     learner_state_adapter: learner_state.LearnerStateAdapter
@@ -161,6 +163,7 @@ def _read_settings(
     secret_values: dict[str, str | None] = {}
     for secret_name in (
         "CLERK_SECRET_KEY",
+        "CLERK_JWT_KEY",
         "GREENLINE_DATABASE_URL",
         "GREENLINE_LOG_HMAC_KEY",
     ):
@@ -179,6 +182,7 @@ def _read_settings(
                     )
                 )
     secret = secret_values["CLERK_SECRET_KEY"]
+    clerk_jwt_key = secret_values["CLERK_JWT_KEY"]
     database_url = secret_values["GREENLINE_DATABASE_URL"]
     log_hmac_key = secret_values["GREENLINE_LOG_HMAC_KEY"]
     parties = tuple(
@@ -269,6 +273,20 @@ def _read_settings(
                 CompositionViolation(
                     "clerk_secret_required",
                     "Hosted Mode requires CLERK_SECRET_KEY",
+                )
+            )
+        if clerk_jwt_key is None:
+            violations.append(
+                CompositionViolation(
+                    "clerk_jwt_key_required",
+                    "Hosted Mode requires CLERK_JWT_KEY for networkless token verification",
+                )
+            )
+        elif not auth.is_pem_public_key(clerk_jwt_key):
+            violations.append(
+                CompositionViolation(
+                    "invalid_clerk_jwt_key",
+                    "CLERK_JWT_KEY must be a PEM public key",
                 )
             )
         if not parties:
@@ -443,6 +461,8 @@ def _read_settings(
     return _RuntimeSettings(
         mode,
         secret,
+        clerk_jwt_key,
+        auth.create_client(secret) if secret is not None else None,
         parties,
         selected_execution,
         selected_learner_state,
@@ -544,7 +564,9 @@ async def clerk_authentication(request: Request, call_next):
             payload = auth.authenticate(
                 request,
                 secret_key=settings.clerk_secret,
+                jwt_key=settings.clerk_jwt_key,
                 parties=list(settings.authorized_parties) or None,
+                client=settings.clerk_client,
             )
         except Exception:
             payload = None
@@ -911,7 +933,9 @@ def list_challenges(request: Request) -> dict:
     catalog_started = time.perf_counter()
     try:
         items = []
-        for meta in ch.load_all():
+        cached_catalog = request.app.state.challenge_catalog
+        catalog = cached_catalog if cached_catalog is not None else ch.load_all()
+        for meta in catalog:
             item = _with_variant_progress(meta, prog)
             item["progress"] = _catalog_progress(item["variants"])
             items.append(_catalog_summary(item))
@@ -1203,6 +1227,9 @@ def create_application(
     application.state.run_jobs_adapter = settings.run_jobs_adapter
     application.state.abuse_control_adapter = settings.abuse_control_adapter
     application.state.security_events = settings.security_events
+    application.state.challenge_catalog = (
+        tuple(ch.load_all()) if settings.mode is RuntimeMode.HOSTED else None
+    )
     application.state.readiness_failed = False
     allowed_origins = settings.authorized_parties or LOCAL_ORIGINS
     application.middleware("http")(enforce_abuse_controls)

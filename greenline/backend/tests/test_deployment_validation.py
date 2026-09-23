@@ -150,6 +150,7 @@ def test_worker_model_rejects_a_clerk_secret() -> None:
                     {"source": name}
                     for name in (
                         "clerk_secret_key",
+                        "clerk_jwt_key",
                         "api_database_url",
                         "security_log_hmac_key",
                         "postgres_ca",

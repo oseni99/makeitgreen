@@ -201,8 +201,8 @@ windows; audit records retain bounded action/resource metadata, never request
 bodies or learner file paths.
 Operational security events are emitted as collector-ready JSON with
 HMAC-pseudonymized learner subjects and severity levels suitable for alert rules.
-Mounted secret files are supported for Clerk, PostgreSQL, and the logging HMAC
-key; see [AUTH.md](AUTH.md).
+Mounted secret files are supported for the Clerk secret and JWT public key,
+PostgreSQL, and the logging HMAC key; see [AUTH.md](AUTH.md).
 
 Authentication setup is documented in [AUTH.md](AUTH.md). The production
 configuration uses Clerk with Google as the sole sign-in provider.

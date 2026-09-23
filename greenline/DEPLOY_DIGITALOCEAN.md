@@ -215,7 +215,9 @@ come from the same release manifest.
    configuration.
 5. Keep the Clerk secret key for the server. Never put it in the frontend or
    commit it.
-6. Confirm the publishable key configured in GitHub belongs to this same Clerk
+6. From **API keys → Show JWT public key**, copy the PEM Public Key into the
+   server's `clerk_jwt_key` secret file. This lets the API verify tokens locally.
+7. Confirm the publishable key configured in GitHub belongs to this same Clerk
    application. It is compiled into the frontend image at build time.
 
 Changing the publishable key requires a new image release; changing the secret
@@ -308,6 +310,7 @@ Use separate, explicit hierarchies. On the application/database host:
 ├── release.env             image digest references only
 ├── secrets/                mode 0700; individual files mode 0600
 │   ├── clerk_secret_key
+│   ├── clerk_jwt_key
 │   ├── api_database_url
 │   ├── postgres_password
 │   └── security_log_hmac_key
@@ -397,11 +400,13 @@ Create strong, independent values for:
 - separate Control Plane and worker database passwords;
 - `GREENLINE_LOG_HMAC_KEY` with at least 32 random bytes;
 - the Clerk secret key.
+- the Clerk PEM JWT public key.
 
 The Control Plane needs:
 
 ```text
 CLERK_SECRET_KEY_FILE=/run/secrets/clerk_secret_key
+CLERK_JWT_KEY_FILE=/run/secrets/clerk_jwt_key
 CLERK_AUTHORIZED_PARTIES=https://makeitgreen.dev
 GREENLINE_DATABASE_URL_FILE=/run/secrets/api_database_url
 GREENLINE_LOG_HMAC_KEY_FILE=/run/secrets/security_log_hmac_key

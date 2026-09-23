@@ -139,8 +139,9 @@ the API from one image.
 
 The backend authentication middleware verifies Clerk session tokens when
 Clerk is configured and exposes the verified `sub` as the learner identity.
-Hosted Mode refuses to start without a Clerk secret and a non-empty
-authorized-party allowlist.
+Hosted Mode refuses to start without a Clerk secret, a PEM JWT public key, and
+a non-empty authorized-party allowlist. The public key keeps token verification
+on-host instead of putting a remote JWKS lookup on the request path.
 
 ### 2. Catalog load
 

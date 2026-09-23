@@ -63,6 +63,7 @@ services:
       - /tmp:mode=1777,size=64m
     environment:
       CLERK_SECRET_KEY_FILE: /run/secrets/clerk_secret_key
+      CLERK_JWT_KEY_FILE: /run/secrets/clerk_jwt_key
       CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:?set CLERK_AUTHORIZED_PARTIES}
       GREENLINE_DATABASE_URL_FILE: /run/secrets/api_database_url
       GREENLINE_LOG_HMAC_KEY_FILE: /run/secrets/security_log_hmac_key
@@ -79,6 +80,7 @@ services:
       GREENLINE_AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-30}
     secrets:
       - clerk_secret_key
+      - clerk_jwt_key
       - api_database_url
       - security_log_hmac_key
       - postgres_ca
@@ -163,6 +165,8 @@ services:
 secrets:
   clerk_secret_key:
     file: ./secrets/clerk_secret_key
+  clerk_jwt_key:
+    file: ./secrets/clerk_jwt_key
   api_database_url:
     file: ./secrets/api_database_url
   security_log_hmac_key:

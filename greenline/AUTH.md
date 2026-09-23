@@ -62,11 +62,17 @@ the deployment platform's runtime secret store.
 ## Hosted secret and proxy configuration
 
 Hosted deployments should mount secrets as files and set
-`CLERK_SECRET_KEY_FILE`, `GREENLINE_DATABASE_URL_FILE`, and
+`CLERK_SECRET_KEY_FILE`, `CLERK_JWT_KEY_FILE`, `GREENLINE_DATABASE_URL_FILE`, and
 `GREENLINE_LOG_HMAC_KEY_FILE`. Direct values remain supported for secret managers
 that inject environment variables, but a direct and `_FILE` form may never be
 set together. File paths must be absolute; unreadable, empty, oversized, or
 ambiguous secret sources fail composition without exposing their contents.
+
+`CLERK_JWT_KEY_FILE` contains the Clerk application's PEM JWT public key from
+**Clerk Dashboard → API keys → Show JWT public key → PEM Public Key**. Hosted
+Mode requires it and verifies session tokens locally, avoiding a remote JWKS
+request on the protected API path. Rotate it together with the Clerk instance's
+signing keys.
 
 Set `GREENLINE_TRUSTED_PROXY_CIDRS` to the explicit IP networks of the load
 balancer or ingress. Wildcard trust is rejected. Start Hosted Mode through

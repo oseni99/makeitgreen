@@ -43,6 +43,7 @@ RFC1918_NETWORKS = tuple(
 )
 APP_SECRET_FILES = {
     "clerk_secret_key": "clerk_secret_key",
+    "clerk_jwt_key": "clerk_jwt_key",
     "api_database_url": "api_database_url",
     "security_log_hmac_key": "security_log_hmac_key",
     "postgres_admin_password": "postgres_admin_password",
@@ -235,6 +236,12 @@ def validate_secrets(app_root: Path, worker_root: Path) -> None:
         "sk_live_"
     ):
         raise DeploymentValidationError("Clerk secret must be a production sk_live_ key")
+    clerk_jwt_key = _secret_text(app_secrets / "clerk_jwt_key", "Clerk JWT key")
+    if not (
+        clerk_jwt_key.startswith("-----BEGIN PUBLIC KEY-----")
+        and clerk_jwt_key.endswith("-----END PUBLIC KEY-----")
+    ):
+        raise DeploymentValidationError("Clerk JWT key must be a PEM public key")
     app_hmac = _secret_text(app_secrets / "security_log_hmac_key", "app HMAC key")
     worker_hmac = _secret_text(
         worker_secrets / "security_log_hmac_key", "worker HMAC key"
@@ -364,6 +371,7 @@ def validate_compose_models(app: dict[str, object], worker: dict[str, object]) -
         raise DeploymentValidationError("control-plane must use a read-only, capability-free root")
     if _secret_sources(control) != {
         "clerk_secret_key",
+        "clerk_jwt_key",
         "api_database_url",
         "security_log_hmac_key",
         "postgres_ca",

@@ -26,11 +26,27 @@ def authorized_parties() -> list[str] | None:
     return parties or None
 
 
+def create_client(secret_key: str) -> Clerk:
+    """Create the process-scoped Clerk client used by request authentication."""
+    return Clerk(bearer_auth=secret_key)
+
+
+def is_pem_public_key(value: str) -> bool:
+    """Return whether a configured JWT key has the expected PEM envelope."""
+    stripped = value.strip()
+    return (
+        stripped.startswith("-----BEGIN PUBLIC KEY-----")
+        and stripped.endswith("-----END PUBLIC KEY-----")
+    )
+
+
 def authenticate(
     request: Request,
     *,
     secret_key: str | None = None,
+    jwt_key: str | None = None,
     parties: list[str] | None = None,
+    client: Clerk | None = None,
 ) -> dict[str, Any] | None:
     secret = secret_key or _secret_key()
     if secret is None:
@@ -41,10 +57,12 @@ def authenticate(
         str(request.url),
         headers=dict(request.headers),
     )
-    state = Clerk(bearer_auth=secret).authenticate_request(
+    sdk = client or create_client(secret)
+    state = sdk.authenticate_request(
         clerk_request,
         AuthenticateRequestOptions(
-            authorized_parties=parties if parties is not None else authorized_parties()
+            authorized_parties=parties if parties is not None else authorized_parties(),
+            jwt_key=jwt_key,
         ),
     )
     if state.status != AuthStatus.SIGNED_IN or state.payload is None:

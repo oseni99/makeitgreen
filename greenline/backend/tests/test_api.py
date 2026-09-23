@@ -91,6 +91,26 @@ def test_catalog_exposes_server_phase_timings(isolated_api: Path) -> None:
     assert all(duration >= 0 for duration in metrics.values())
 
 
+def test_catalog_uses_the_preloaded_release_snapshot(
+    isolated_api: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _create_challenge(isolated_api, "demo")
+    api.app.state.challenge_catalog = tuple(ch.load_all())
+    monkeypatch.setattr(
+        ch,
+        "load_all",
+        lambda: pytest.fail("a preloaded catalog must not reread metadata"),
+    )
+
+    try:
+        response = TestClient(api.app).get("/api/challenges")
+    finally:
+        api.app.state.challenge_catalog = None
+
+    assert response.status_code == 200
+    assert [item["slug"] for item in response.json()["challenges"]] == ["demo"]
+
+
 def test_catalog_exposes_summaries_without_challenge_content(
     isolated_api: Path,
 ) -> None:

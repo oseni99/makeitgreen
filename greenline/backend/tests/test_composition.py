@@ -15,10 +15,16 @@ OPERATIONS = {
     "GREENLINE_LOG_HMAC_KEY": "test-log-key-" + "x" * 32,
     "GREENLINE_RELEASE_SHA": "a" * 40,
 }
+TEST_JWT_KEY = "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----"
 
 
 def _hosted_environment(**values: str) -> dict[str, str]:
-    return {"GREENLINE_MODE": "hosted", **OPERATIONS, **values}
+    return {
+        "GREENLINE_MODE": "hosted",
+        "CLERK_JWT_KEY": TEST_JWT_KEY,
+        **OPERATIONS,
+        **values,
+    }
 
 
 class _ReadyCursor:
@@ -100,6 +106,7 @@ def test_hosted_mode_reports_every_missing_safety_requirement() -> None:
 
     assert _codes(raised.value) == {
         "clerk_secret_required",
+        "clerk_jwt_key_required",
         "authorized_parties_required",
         "api_process_role_required",
         "durable_state_required",
@@ -110,6 +117,15 @@ def test_hosted_mode_reports_every_missing_safety_requirement() -> None:
         "security_logging_required",
         "release_identity_required",
     }
+
+
+def test_hosted_mode_rejects_a_non_pem_clerk_jwt_key() -> None:
+    with pytest.raises(CompositionError) as raised:
+        create_application(
+            _hosted_environment(CLERK_JWT_KEY="not-a-pem-public-key")
+        )
+
+    assert "invalid_clerk_jwt_key" in _codes(raised.value)
 
 
 def test_placeholder_adapters_cannot_bypass_the_hosted_gate() -> None:
