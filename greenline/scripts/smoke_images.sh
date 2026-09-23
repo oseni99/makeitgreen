@@ -15,12 +15,15 @@ worker_name="greenline-worker-smoke-$$"
 postgres_name="greenline-postgres-smoke-$$"
 network_name="greenline-smoke-$$"
 database_url="postgresql://postgres:postgres@$postgres_name:5432/greenline_ci"
+clerk_private_key="$smoke_root/clerk-smoke-private.pem"
+clerk_public_key="$smoke_root/clerk-smoke-public.pem"
 
 cleanup() {
     docker rm --force "$worker_name" >/dev/null 2>&1 || true
     docker rm --force "$control_name" >/dev/null 2>&1 || true
     docker rm --force "$postgres_name" >/dev/null 2>&1 || true
     docker network rm "$network_name" >/dev/null 2>&1 || true
+    rm -f "$clerk_private_key" "$clerk_public_key"
     rmdir "$bundle_root" >/dev/null 2>&1 || true
     rmdir "$smoke_root" >/dev/null 2>&1 || true
 }
@@ -28,6 +31,12 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$bundle_root"
 chmod 0777 "$bundle_root"
+umask 077
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out "$clerk_private_key" >/dev/null 2>&1
+openssl pkey -in "$clerk_private_key" -pubout \
+    -out "$clerk_public_key" >/dev/null 2>&1
+clerk_jwt_key=$(cat "$clerk_public_key")
 
 docker network create "$network_name" >/dev/null
 docker run --detach \
@@ -73,6 +82,7 @@ docker run --detach \
     --env GREENLINE_PORT=18080 \
     --env GREENLINE_TRUSTED_PROXY_CIDRS=127.0.0.1/32 \
     --env CLERK_SECRET_KEY=sk_test_image_smoke \
+    --env "CLERK_JWT_KEY=$clerk_jwt_key" \
     --env CLERK_AUTHORIZED_PARTIES=http://127.0.0.1:18080 \
     --env GREENLINE_LOG_HMAC_KEY=image-smoke-hmac-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
     --env "GREENLINE_DATABASE_URL=$database_url" \
