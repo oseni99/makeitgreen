@@ -180,7 +180,7 @@ def test_application_reuses_one_clerk_client_across_requests(monkeypatch) -> Non
     assert clients[0] is application.state.runtime_settings.clerk_client
 
 
-def test_hosted_api_requires_signed_beta_access_claim(monkeypatch) -> None:
+def test_hosted_api_accepts_authenticated_user_without_beta_claim(monkeypatch) -> None:
     settings = SimpleNamespace(
         mode=api.RuntimeMode.HOSTED,
         clerk_secret="sk_test_example",
@@ -216,15 +216,6 @@ def test_hosted_api_requires_signed_beta_access_claim(monkeypatch) -> None:
         api.auth,
         "authenticate",
         lambda _request, **_kwargs: {"sub": "user_123"},
-    )
-    denied = asyncio.run(api.clerk_authentication(request(), call_next))
-    assert denied.status_code == 403
-    assert reached is False
-
-    monkeypatch.setattr(
-        api.auth,
-        "authenticate",
-        lambda _request, **_kwargs: {"sub": "user_123", "beta_access": True},
     )
     allowed = asyncio.run(api.clerk_authentication(request(), call_next))
     assert allowed.status_code == 200

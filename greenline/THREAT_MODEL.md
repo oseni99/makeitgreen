@@ -2,10 +2,11 @@
 
 **Status:** owner-reviewed architecture baseline; launch approval pending
 
-**Last reconciled with the codebase:** 2026-09-10
+**Last reconciled with the codebase:** 2026-09-28
 
-**Target deployment:** invite-only beta with the public application/database and
-untrusted-code Execution Worker pool on separate DigitalOcean Droplets, following
+**Target deployment:** authenticated self-service access with the public
+application/database and untrusted-code Execution Worker pool on separate
+DigitalOcean Droplets, following
 [`DEPLOY_DIGITALOCEAN.md`](DEPLOY_DIGITALOCEAN.md)
 
 This document defines what MakeItGreen must protect before Hosted Mode receives
@@ -15,20 +16,20 @@ not evidence that the deployment gates below are satisfied.
 
 ## Executive decision
 
-MakeItGreen is **not ready for untrusted public traffic**. It may open an invited
-beta only after every `G-*` launch gate in this document has recorded passing
-evidence and the owner has explicitly accepted the unavoidable content-copying
-limitation:
+MakeItGreen treats every signed-in learner and every submitted repository as
+untrusted. Self-service registration does not weaken the execution boundary, but
+it increases capacity, abuse, scraping, recovery, and monitoring pressure. Every
+`G-*` launch gate still requires passing evidence, and the owner must explicitly
+accept the unavoidable content-copying limitation:
 
 1. An authorized learner can still copy content manually or coordinate across
    accounts. The product can make bulk extraction expensive and detectable, but
    cannot make content shown in a browser impossible to copy.
 
-Clerk Invite-only mode and the signed `beta_access: true` claim are necessary, but
-they are admission controls rather than a sandbox. An invited account must still be
-treated as hostile when it submits source code. The owner requires a separate
-execution host from the first beta release rather than accepting the previous
-single-host Docker/kernel risk.
+Clerk authentication is an identity boundary, not a sandbox or an enrollment
+allowlist. Any authenticated account must be treated as hostile when it submits
+source code. The owner requires a separate execution host rather than accepting
+the previous single-host Docker/kernel risk.
 
 ## Scope and assumptions
 
@@ -83,7 +84,7 @@ single-host Docker/kernel risk.
 
 ```mermaid
 flowchart LR
-    U[Invited learner browser] -->|HTTPS| E[Cloudflare DNS / Internet edge]
+    U[Authenticated learner browser] -->|HTTPS| E[Cloudflare DNS / Internet edge]
     E -->|HTTPS| C[Caddy]
     C -->|private network| A[Control Plane]
     U <-->|session and OAuth| K[Clerk / Google]
@@ -102,8 +103,8 @@ flowchart LR
 | Boundary | Less-trusted side | More-sensitive side | Required enforcement |
 |---|---|---|---|
 | TB-1 Internet edge | Anonymous network client | Caddy and application origin | TLS, edge request limits, DDoS controls, no direct backend port |
-| TB-2 Browser/API | Browser and bearer token | Control Plane and learner data | Clerk signature/session validation, authorized-party allowlist, exact `beta_access` claim, request-size and rate limits |
-| TB-3 Identity provider | OAuth/session response | Application authorization | Production Clerk keys, Google OAuth credentials, Invite-only mode, administrator-only beta grant, revocation procedure |
+| TB-2 Browser/API | Browser and bearer token | Control Plane and learner data | Clerk signature/session validation, authorized-party allowlist, request-size and rate limits |
+| TB-3 Identity provider | OAuth/session response | Application authorization | Production Clerk keys, Google OAuth credentials, Open access mode, session revocation procedure |
 | TB-4 Control Plane/database | Public request-derived values | All durable tenant state | Parameterized queries, `user_id` from verified `sub`, least-privilege application role, backups and audit export |
 | TB-5 Application host/worker pool | Enqueued job and restricted worker DB role | Execution authority and durable tenant state | Private VPC with TLS/firewall, PostgreSQL queue, fenced claims and leases, no Docker socket or CLI on the application host |
 | TB-6 Worker/Docker | Worker process | Host-level container authority | Dedicated execution hosts, restricted host access, exact images, runtime readiness, host patching; worker compromise is execution-host compromise |
@@ -127,19 +128,19 @@ flowchart LR
 ## Actors
 
 - **Anonymous client:** has network access but no valid Clerk session.
-- **Invited learner:** may read authorized content and submit arbitrary source code.
-- **Malicious invited learner:** deliberately scrapes, exhausts capacity, tampers with
+- **Authenticated learner:** may read authorized content and submit arbitrary source code.
+- **Malicious authenticated learner:** deliberately scrapes, exhausts capacity, tampers with
   grading, probes tenant boundaries, or attempts container escape.
 - **Compromised learner account:** possesses a valid session without the owner's
   consent.
-- **Distributed extractor:** coordinates multiple approved or compromised accounts to
+- **Distributed extractor:** coordinates multiple self-created or compromised accounts to
   stay below per-user limits.
 - **Supply-chain attacker:** attempts to alter source, dependencies, Actions, images,
   tags, or release records.
 - **Compromised application component:** gains the privileges of the Control Plane,
   worker, database role, or log collector.
 - **Operator error or compromise:** misconfigures Hosted Mode, exposes a port, leaks a
-  secret, grants beta access incorrectly, or deploys the wrong release.
+  secret, configures identity incorrectly, or deploys the wrong release.
 
 ## Invariants enforced by the application
 
@@ -149,7 +150,8 @@ These claims are present in code and tests. The deployment must not bypass them.
    PostgreSQL state, durable Run Jobs, abuse controls, trusted proxies, security
    logging, process role, and immutable release identity are configured.
 2. Every Hosted `/api/*` request requires a verified Clerk session whose `azp` is in
-   `CLERK_AUTHORIZED_PARTIES` and whose signed `beta_access` claim is exactly `true`.
+   `CLERK_AUTHORIZED_PARTIES`. Self-service registration does not permit anonymous API
+   access.
 3. Learner identity comes only from the verified Clerk `sub`; request bodies and URLs
    cannot choose a tenant ID.
 4. The Hosted Control Plane uses a disabled execution adapter and contains neither the
@@ -177,17 +179,17 @@ These claims are present in code and tests. The deployment must not bypass them.
 
 ## Threat register
 
-Risk is the expected beta risk **after current application controls but before missing
+Risk is the expected production risk **after current application controls but before missing
 deployment gates**: Critical, High, Medium, or Low.
 
 ### Identity and authorization
 
 | ID | Threat and impact | Existing control | Residual risk / required treatment | Risk |
 |---|---|---|---|---:|
-| T-ID-1 | Anonymous or uninvited access to the API | Clerk verification, Invite-only configuration, signed `beta_access` gate | Prove Production keys and authorized parties are used; test no-token, invalid-token, wrong-`azp`, and missing-beta requests against the deployed edge | Medium |
-| T-ID-2 | Invite accepted by the wrong account or beta granted too broadly | Invitation email ownership and administrator-set public metadata | Document the grant/revoke checklist; verify the invited email before granting; review users weekly during beta | Medium |
+| T-ID-1 | Anonymous access to the API | Clerk verification and exact authorized-party configuration | Prove Production keys and authorized parties are used; test no-token, invalid-token, and wrong-`azp` requests against the deployed edge | Medium |
+| T-ID-2 | Automated account creation is used to spam runs or evade per-user limits | Clerk-managed sign-up, durable per-user limits, global run capacity, and request auditing | Exercise sign-up abuse protections, monitor account/run creation, retain the global capacity ceiling, and add edge or identity-provider controls if abuse appears | Medium |
 | T-ID-3 | Stolen session or OAuth account permits authorized access | Clerk/Google session controls and revocation | Require MFA/passkeys for all operator accounts; define learner-session revocation and incident response; avoid long-lived credentials in browsers | Medium |
-| T-ID-4 | Forged or stale `beta_access` is trusted | Claim is inside Clerk's verified session token and compared as boolean `true` | On revocation, end the user's Clerk sessions rather than waiting only for claim refresh; verify this drill | Low |
+| T-ID-4 | Forged or stale sessions are trusted | Tokens are signature-, issuer-, time-, and authorized-party-verified | End a user's Clerk sessions when revoking access and verify the revocation drill | Low |
 | T-ID-5 | OAuth or DNS misconfiguration redirects users to an attacker | Clerk-managed subdomains and configured Google callback | Lock down Cloudflare, Clerk, and Google accounts with MFA; inventory exact origins/callbacks; alert on DNS changes | Medium |
 
 ### Tenant data and application input
@@ -198,7 +200,7 @@ deployment gates**: Critical, High, Medium, or Low.
 | T-DATA-2 | Path traversal, symlink, or protected-file overwrite changes trusted tests or host files | Canonical path policy, intrinsic read-only files, creatable allowlist, overlay revalidation, read-only Run Bundle | Keep validation tests in CI; treat any new file API or archive import as a new threat-model review trigger | Low |
 | T-DATA-3 | SQL injection corrupts or discloses PostgreSQL | Current adapters use parameterized queries and bounded enums/actions | Maintain parameterization; prohibit request-derived SQL identifiers; DB role must have no DDL or role-management privileges | Low |
 | T-DATA-4 | Oversized bodies, outputs, free text, or histories exhaust memory/storage | 256 KiB request default, bounded fields, 20k output, ten run checkpoints, retention/pruning | Add disk/DB growth alerts and quotas; load-test chunked bodies and repeated allowed-size writes | Medium |
-| T-DATA-5 | Learners put secrets or personal data in workspaces/debriefs; backups or support access expose it | No source or free text in Product Events/security logs | Publish a beta privacy notice, restrict backup/log access, define deletion/retention, and never use learner content for support without consent | Medium |
+| T-DATA-5 | Learners put secrets or personal data in workspaces/debriefs; backups or support access expose it | No source or free text in Product Events/security logs | Publish a privacy notice, restrict backup/log access, define deletion/retention, and never use learner content for support without consent | Medium |
 | T-DATA-6 | Browser-rendered learner or challenge text executes script and steals a token | React escapes text; Markdown is rendered without an intentional raw-HTML path | Add deployment CSP and regression tests for hostile Markdown/file names; review any future HTML/preview plugin as a security-sensitive change | Medium |
 
 ### Untrusted code execution
@@ -217,10 +219,10 @@ deployment gates**: Critical, High, Medium, or Low.
 
 | ID | Threat and impact | Existing control | Residual risk / required treatment | Risk |
 |---|---|---|---|---:|
-| T-CONTENT-1 | Anonymous scraper downloads the challenge bank | Entire Hosted API requires Clerk and `beta_access`; catalog contains summaries only | Prove the deployed edge cannot reach an unauthenticated alternate port or Local Mode process | Low |
+| T-CONTENT-1 | Anonymous scraper downloads the challenge bank | Entire Hosted API requires a verified Clerk session; catalog contains summaries only | Prove the deployed edge cannot reach an unauthenticated alternate port or Local Mode process | Low |
 | T-CONTENT-2 | Authorized learner automates sequential content extraction | 120 content reads/minute, 20 distinct challenges/hour, five solutions/hour, durable cross-replica counters, security event on bulk access | Limits slow extraction; they do not prevent patient scraping. Alert and revoke accounts that show systematic extraction | Medium |
 | T-CONTENT-3 | Learner retrieves all solutions | Per-learner solved/spoiled gate plus solution rate limit | A learner may intentionally spoil and copy up to the limit. Preserve the learning tradeoff; consider canary markers only if they do not harm challenge quality | Medium |
-| T-CONTENT-4 | Multiple accounts collude to bypass per-user limits | Invite-only enrollment and manual beta grant | Keep the invite list small, verify identities, prohibit account sharing in beta terms, review correlated security signals without collecting invasive learner content | Medium |
+| T-CONTENT-4 | Multiple accounts collude to bypass per-user limits | Global capacity limits, durable per-account counters, and structured security events | Monitor correlated extraction and run behavior without collecting invasive learner content; add account-creation friction or network-level controls if observed | High until monitored |
 | T-CONTENT-5 | Content leaks from repository, image registry, CI artifact, backup, or operator machine | Private access can be applied outside the app; immutable releases aid attribution | Confirm repository/package visibility matches the business decision; limit collaborator/package access; ensure backups and image layers do not unintentionally publish solutions | High until verified |
 
 ### Network, availability, and operations
@@ -271,7 +273,7 @@ confirmation is not sufficient.
 
 | Gate | Requirement | Passing evidence | Status |
 |---|---|---|---|
-| G-1 Identity | Production Clerk uses Invite-only, Google OAuth, exact authorized origins, signed boolean beta claim, and approved users only | Screenshots/export of settings; deployed 401/403/200 tests; grant-and-revoke drill | Partially complete; deployment test pending |
+| G-1 Identity | Production Clerk uses Open access, Google OAuth, exact authorized origins, locally verified session tokens, and documented revocation | Screenshots/export of settings; deployed 401/200 tests; new-account and session-revocation drills | Partially complete; open-access deployment test pending |
 | G-2 Secrets | Production secrets are mounted/injected, absent from Git/images/logs, independently rotatable, and operator accounts use MFA | Secret scan; mount/permission check; rotation record for Clerk, DB, HMAC, GHCR/deploy credentials | Open; rotate exposed development Clerk secret |
 | G-3 Network | Only application-host Caddy 80/443 is public; SSH is IP-restricted; backend, private-VPC database, Docker, workers, and Run Bundles are unreachable publicly | External scans of every host plus VPC/TLS, host/Compose, and firewall configuration capture | Open |
 | G-4 Edge | TLS, HSTS, CSP, MIME/referrer/frame policies, body/connection limits, and edge rate/DDoS controls are active | Header scan, TLS scan, oversized/chunked request test, rate-limit test | Open |
@@ -287,9 +289,9 @@ confirmation is not sufficient.
 Run these through the public HTTPS origin, not directly against a developer process,
 except for the explicitly identified direct staging capacity probe:
 
-1. No token, malformed token, wrong authorized party, and valid token without
-   `beta_access` return 401/403 and never create learner state.
-2. Revoking `beta_access` and ending sessions blocks the next request.
+1. No token, malformed token, and wrong authorized party return 401 and never
+   create learner state; a valid newly created account reaches the API.
+2. Ending a user's Clerk sessions blocks the next request.
 3. User A cannot read, mutate, restore, reset, spoil, debrief, or poll User B's data or
    Run Job ID.
 4. Encoded traversal, symlink overlays, protected test/config writes, and unauthorized
@@ -340,7 +342,7 @@ except for the explicitly identified direct staging capacity probe:
 
 The owner must review this model again before any of the following:
 
-- opening self-service registration or removing either invite/beta gate;
+- allowing anonymous API access or adding a new enrollment/authorization gate;
 - exceeding the tested per-host concurrency or changing the worker trust/network
   boundary;
 - placing unrelated workloads on the execution host;
@@ -362,3 +364,4 @@ The owner must review this model again before any of the following:
 | Accept manual-copy/content-collusion limitation for invited beta | Oluwatosin | 2026-09-10 | Accepted for the invite-only beta; bulk extraction remains rate-limited and monitored |
 | Require separate execution hosts for invited beta | Oluwatosin | 2026-09-10 | Accepted; no Docker authority or Challenge Runs on the application host |
 | Approve beta launch after gates G-1 through G-10 pass | Pending | Pending | No public traffic before approval |
+| Replace invite-only enrollment with authenticated self-service registration | Oluwatosin | 2026-09-28 | Remove the custom `beta_access` gate; retain Clerk authentication, tenant isolation, durable admission, global capacity, content limits, and worker isolation |

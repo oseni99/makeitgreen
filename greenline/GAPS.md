@@ -1,6 +1,6 @@
 # MakeItGreen — Known Gaps & Improvement Backlog
 
-**Last reconciled with the codebase and invited production beta:** 2026-09-20
+**Last reconciled with the codebase and production deployment:** 2026-09-28
 
 **Audience:** an agent (or engineer) picking up work on this codebase with no prior context.
 Read `README.md` first for architecture and how to run. This document is the honest,
@@ -45,7 +45,7 @@ the practice loop, editor failure navigation, checkpoint restoration, route reco
 and solution-access failure handling. CI is
 `.github/workflows/greenline.yml`.
 
-The invited production beta is live at `makeitgreen.dev`. Its app, PostgreSQL, Caddy,
+The authenticated production service is live at `makeitgreen.dev`. Its app, PostgreSQL, Caddy,
 and worker containers have been deployed on separate hosts; public health checks report
 the exact release and a matching live worker; and authenticated Python challenge runs
 have completed through the hosted queue. This proves the core release works. It does
@@ -55,7 +55,7 @@ not yet prove automated recovery, public-scale capacity, or unattended operation
 
 | Priority | Work | Why now |
 |---|---|---|
-| Now | Recovery, monitoring, and capacity evidence | The invited beta works, but off-host backups, restore drills, external alerts, durable logs, and named capacity probes remain |
+| Now | Recovery, monitoring, and capacity evidence | Production works, but off-host backups, restore drills, external alerts, durable logs, and named capacity probes remain; Open registration raises the urgency |
 | Next | Staging acceptance and host deployment automation | Exercise the real built containers before production and deploy exact digests to both hosts without a manual SSH session |
 | Next | Browser, accessibility, and dependency verification | Add real-browser acceptance, keyboard/mobile checks, and triage the current dependency audit findings |
 | Later | Workspace maintainability | Decompose the large workspace page only after browser-level behavior is protected |
@@ -63,10 +63,10 @@ not yet prove automated recovery, public-scale capacity, or unattended operation
 | Later | Retention practice and weekly publishing workflow | Evaluate after the beta learning loop has real usage |
 | Parked | AI mock interviewer | Explicitly deferred by the owner |
 
-The local-first feature backlog is complete and the invite-only beta is deployed. Keep
-access invite-only; do not open anonymous or unrestricted public access until the
-remaining recovery, monitoring, staging, and capacity gates are implemented and
-exercised.
+The local-first feature backlog is complete and authenticated production is deployed.
+Self-service registration is supported, but anonymous API access remains forbidden.
+Recovery, monitoring, staging, account-abuse, and capacity work is now more urgent
+because any user may create an authenticated account.
 
 ## Current backend safety baseline (do not regress)
 
@@ -85,8 +85,8 @@ These used to be gaps and are now implemented and regression-tested:
   briefly, then escalates to KILL so spawned descendants do not survive the run.
 - Invalid `challenge.json` content and non-UTF-8 challenge files return deterministic
   JSON errors rather than an opaque plain-text 500.
-- Hosted Mode requires the signed Clerk `beta_access` claim, returns only summary
-  metadata from the catalog, gates solutions on solved/spoiled state, and temporarily
+- Hosted Mode requires a verified Clerk session, returns only summary metadata from
+  the catalog, gates solutions on solved/spoiled state, and temporarily
   blocks bulk cross-challenge or solution extraction with PostgreSQL-backed counters.
 
 Relevant regression suites live under `backend/tests/`. These protections make the
@@ -270,8 +270,8 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   scoring may additionally require a trusted supervisor and a protocol that does not
   accept the candidate process's exit status as the sole source of truth.
 - **Current API/state:** Clerk bearer-token verification is enforced whenever
-  `CLERK_SECRET_KEY` is configured; Hosted Mode additionally requires the verified
-  `beta_access: true` session claim, and deployment guidance requires Clerk Invite-only
+  `CLERK_SECRET_KEY` is configured. Hosted Mode accepts any valid Clerk session from
+  an authorized application origin; deployment guidance requires Clerk Open access
   mode. The frontend exposes Google-only sign-in when `VITE_CLERK_PUBLISHABLE_KEY` is
   configured. Authenticated workspaces, progress, and run history are isolated by
   Clerk's verified `sub`. The catalog exposes only browsing summaries; full briefs and
@@ -308,11 +308,12 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   under `deploy/`. The validator rejects a public database bind, mutable images,
   mismatched shared policy, a Docker socket in the application trust zone, and Clerk
   credentials in the worker trust zone.
-- **Current hosted state:** an invite-only production beta is running with separate
+- **Current hosted state:** production is running with separate
   application/database and execution-worker hosts, TLS at Caddy, private PostgreSQL
-  binding, no public worker API, digest-pinned images, and Clerk-gated access. The core
-  hosted Python run path has been exercised successfully. This is an operated beta,
-  not evidence that the system is ready for unrestricted public traffic.
+  binding, no public worker API, digest-pinned images, and Clerk-authenticated access.
+  The core hosted Python run path has been exercised successfully. Self-service
+  registration increases exposure; this deployment is not evidence of public-scale
+  capacity or unattended operational readiness.
 - **Remaining public-launch gates:** implement and exercise secret rotation,
   collector-backed JSON logs with concrete alert rules, durable audit export,
   off-host backups and clean-host restore drills, registry retention, external uptime
@@ -495,7 +496,7 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   timeout or unhealthy rollout. Runnable-manifest identity is checked between scanned
   images and attested archives, and the release records are attested. No promotion or
   rollback rebuilds an image.
-- **Live invited beta:** the control plane, Caddy, and PostgreSQL run on the app host;
+- **Live authenticated production:** the control plane, Caddy, and PostgreSQL run on the app host;
   the execution worker and Docker daemon run on a separate worker host. Production
   health and exact-release checks pass, and an authenticated hosted challenge run has
   completed. Host rollout is still a manual operator procedure: moving registry tags
@@ -511,8 +512,8 @@ local workflow safer; they are not a substitute for production isolation (gap 7)
   must run on a separate execution host pool with no Clerk secret or public listener.
   Start each 1 GiB staging worker at 384 MiB per run and concurrency one, then resize or
   add workers based on named cohort/burst probe evidence rather than treating one as a
-  global production concurrency limit. The invited beta keeps PostgreSQL on the
-  application Droplet; before the public launch, rehearse and complete the provider-neutral
+  global production concurrency limit. The current deployment keeps PostgreSQL on the
+  application Droplet; before materially increasing traffic, rehearse and complete the provider-neutral
   Neon cutover in [`MIGRATE_NEON.md`](MIGRATE_NEON.md). Add backup/restore drills, deployment rollout
   integration, structured log collection, and operational alerting before public traffic.
 
@@ -598,9 +599,9 @@ run checkpoints, the first three content batches and Node challenges, learning
 tracks/cadence, and the social-preview asset are implemented and tested.
 
 The owner-reviewed production architecture is documented in
-[`THREAT_MODEL.md`](THREAT_MODEL.md). The invite-only beta now uses the required
-separation between the application/database host and execution host. Manual host rollout
-remains an accepted beta limitation; registry promotion is not yet host deployment.
+[`THREAT_MODEL.md`](THREAT_MODEL.md). Production uses the required separation between
+the application/database host and execution host. Manual host rollout remains an
+accepted limitation; registry promotion is not yet host deployment.
 
 Work next in this order:
 
@@ -615,8 +616,9 @@ Work next in this order:
 4. Run keyboard, screen-reader, mobile-browser, and dependency-security audits.
 5. Decompose `Workspace.tsx` after the browser acceptance suite protects its behavior.
 
-Only after those controls are implemented and exercised should the service move from
-invite-only access to unrestricted public traffic.
+Self-service registration does not remove these requirements. Track real account and
+run volume closely, preserve the global capacity ceiling, and prioritize these controls
+before promoting the service broadly.
 
 This table tracks the currently identified backlog, including minor items; it is a
 living inventory rather than a guarantee that no further work will be discovered.
@@ -640,7 +642,7 @@ gap 14 foundation and frontend behavioral coverage.
 | 9 | Platform tests + content validation CI foundation (gap 14) | S–M | Compounding | ✅ done |
 | 10 | Streaming runs + per-challenge venvs (gaps 8, 6) | L | Medium | ✅ done |
 | 11 | AI interviewer (gap 4) | L | Parked — owner said skip for now | ⏸ deferred |
-| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks public launch | ◐ invite-only beta live; recovery, monitoring, automation, and capacity evidence remain |
+| 12 | Threat model + deployment operations (gaps 7, 15) | L | Blocks safe growth | ◐ authenticated production live; recovery, monitoring, account-abuse controls, automation, and capacity evidence remain |
 | 13 | Multiple editor tabs (gap 12) | S–M | Medium | ✅ done |
 | 14 | Cmd+S save + "saved" indicator (gap 12) | S | Medium | ✅ done |
 | 15 | Unsaved-changes guard on navigation (gap 12) | S | Medium | ✅ done |

@@ -574,20 +574,6 @@ async def clerk_authentication(request: Request, call_next):
             _record_server_timing(request, "auth", started)
         if payload is None:
             return JSONResponse(status_code=401, content={"detail": "authentication required"})
-        if (
-            settings.mode is RuntimeMode.HOSTED
-            and payload.get("beta_access") is not True
-        ):
-            subject = payload.get("sub")
-            settings.security_events.emit(
-                "auth.beta_access_denied",
-                user_id=subject if isinstance(subject, str) else None,
-                severity="warning",
-            )
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "beta access required"},
-            )
         request.state.clerk_payload = payload
     return await call_next(request)
 

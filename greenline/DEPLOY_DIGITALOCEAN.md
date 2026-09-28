@@ -1,8 +1,8 @@
-# Launching the MakeItGreen beta on DigitalOcean
+# Operating MakeItGreen on DigitalOcean
 
-This is the recommended low-cost deployment plan for an **invited beta**. It
-keeps untrusted Challenge Runs on execution hosts that are separate from the
-public Control Plane and PostgreSQL from the first beta release.
+This is the recommended low-cost deployment plan for authenticated self-service
+access. It keeps untrusted Challenge Runs on execution hosts that are separate
+from the public Control Plane and PostgreSQL.
 
 This is a deployment runbook, not a claim that the server already exists. See
 [Current repository readiness](#current-repository-readiness) for the pieces
@@ -10,7 +10,7 @@ that are ready and the pieces still missing.
 
 The database hosting decision has two explicit stages:
 
-1. The invited beta uses self-hosted PostgreSQL on the application Droplet so
+1. The initial deployment uses self-hosted PostgreSQL on the application Droplet so
    both trust zones remain inside one DigitalOcean VPC while capacity and the
    learning loop are still being proven.
 2. Before the broader public launch, rehearse and perform the controlled Neon
@@ -107,7 +107,7 @@ burst into a lighter workload. Completion polling is excluded from this window.
 
 ```mermaid
 flowchart TB
-    U[Invited learner] -->|HTTPS| C[Caddy]
+    U[Authenticated learner] -->|HTTPS| C[Caddy]
     C --> A[Control Plane container]
     A --> P[(PostgreSQL container)]
     A --> K[Clerk]
@@ -158,8 +158,8 @@ compromise does not directly expose the Control Plane host or Clerk secret.
 ### Already configured externally
 
 - `makeitgreen.dev` is registered in Cloudflare.
-- The Clerk Production instance uses Invite-only access, a signed
-  `beta_access` claim, and Google OAuth with custom production credentials.
+- The Clerk Production instance uses Open access and Google OAuth with custom
+  production credentials. Every application API remains authenticated.
 - Clerk's `accounts.makeitgreen.dev`, `clerk.makeitgreen.dev`, and email DNS
   records were verified, and one invited user completed the hosted sign-in flow.
 
@@ -209,8 +209,9 @@ come from the same release manifest.
    configuration.
 2. Keep Google as the configured sign-in provider, matching
    [`AUTH.md`](AUTH.md).
-3. Set Clerk access mode to **Invite-only**, add the `beta_access` session
-   claim from `public_metadata.beta_access`, and grant it only to approved testers.
+3. Set Clerk access mode to **Open**. Do not configure or depend on a
+   `beta_access` custom claim; any user with a valid Clerk session may use the
+   authenticated application.
 4. Add the final application origin, `https://makeitgreen.dev`, to the Clerk
    configuration.
 5. Keep the Clerk secret key for the server. Never put it in the frontend or
@@ -544,10 +545,11 @@ record the PostgreSQL client/server versions beside each artifact. At least one
 restore drill must also exercise the source-to-Neon rehearsal described in
 [`MIGRATE_NEON.md`](MIGRATE_NEON.md) before the public-launch cutover.
 
-### Phase 14: open the invited beta
+### Phase 14: open authenticated self-service access
 
-1. Keep Clerk in Invite-only mode and grant `beta_access: true` only to the
-   short list of approved testers.
+1. Set Clerk access mode to **Open** and confirm that a newly created account
+   can load `/challenges`. Authentication remains required for every API
+   request; only the separate enrollment gate is removed.
 2. On the disposable staging database connected to the real worker pool, run:
 
    ```bash
@@ -629,7 +631,7 @@ boundary.
 
 ## Upgrade path
 
-The two-zone beta can scale execution independently from the application:
+The two-zone deployment can scale execution independently from the application:
 
 1. Add worker Droplets when queue wait grows but a single host's memory and CPU
    are already safely utilized. PostgreSQL `SKIP LOCKED` claims and fenced
@@ -638,9 +640,9 @@ The two-zone beta can scale execution independently from the application:
    rerun the capacity probe before raising its concurrency.
 3. Resize or separate the application and PostgreSQL when API latency, database
    memory, or recovery operations become the constraint.
-4. After the invited beta, execute the rehearsed
+4. When the database becomes the next operational constraint, execute the rehearsed
    [`MIGRATE_NEON.md`](MIGRATE_NEON.md) cutover and observe the managed database
-   before the public launch.
+   before materially increasing traffic.
 5. Consider a sandbox provider or VM-per-run adapter only when its operational
    savings justify an execution-layer change.
 
