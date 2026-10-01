@@ -10,8 +10,6 @@ set -eu
 scan_parent=${RUNNER_TEMP:-/tmp}
 scan_root="$scan_parent/greenline-image-scan-$$"
 active_container=
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ignore_file="$script_dir/../.trivyignore.yaml"
 
 cleanup() {
     if [ -n "$active_container" ]; then
@@ -52,10 +50,8 @@ scan_image() {
 
     docker run --rm \
         --mount "type=bind,src=$rootfs,dst=/target,readonly" \
-        --mount "type=bind,src=$ignore_file,dst=/policy/.trivyignore.yaml,readonly" \
         --mount type=volume,src=greenline-trivy-cache,dst=/root/.cache \
         "$TRIVY_IMAGE" rootfs --scanners vuln --ignore-unfixed \
-        --ignorefile /policy/.trivyignore.yaml \
         --severity HIGH,CRITICAL --exit-code 1 /target
 
     if [ -n "${SBOM_DIR:-}" ]; then

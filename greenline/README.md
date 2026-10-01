@@ -178,10 +178,10 @@ Actions, the scanner, PostgreSQL smoke dependency, and BuildKit SBOM generator
 are pinned to immutable commits or image digests.
 
 Final Python runtimes do not retain `pip`. The Node execution image contains the
-built-in `node:test` runner but removes npm, Corepack, and Yarn. The temporary
-Docker CLI exceptions in `.trivyignore.yaml` are scoped to
-`usr/local/bin/docker` and expire on 2026-10-01; refresh the Docker CLI base
-digest before that date rather than extending the exceptions without review.
+built-in `node:test` runner but removes npm, Corepack, and Yarn. The Docker CLI
+base is pinned to a reviewed image whose copied `usr/local/bin/docker` binary
+passes the same fixable high/critical vulnerability gate as every other runtime
+component; CI carries no Docker CLI vulnerability exception.
 
 `scripts/smoke_images.sh` applies migrations to disposable PostgreSQL, starts
 the read-only control-plane and worker images with dropped capabilities, checks
